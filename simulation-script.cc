@@ -14,6 +14,12 @@ the blackhole attack
 #include "ns3/aodv-module.h"
 #include "ns3/applications-module.h"
 
+#include "ns3/yans-wifi-phy.h"
+#include "ns3/yans-wifi-helper.h"
+#include "ns3/wifi-net-device.h"
+
+#include "ns3/v4ping-helper.h"
+
 using namespace ns3;
 using namespace std;
 
@@ -22,10 +28,10 @@ using namespace std;
 */
 NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
 
-int main(nt argc, char *argv[])
+int main(int argc, char **argv)
 {
-   
-   int numberOfNodes=10; //10
+   cout<<"Simulation starting now";
+   int numberOfNodes=5; //10
    int simulationTime; //200s
    int simulationArea; //100 m x 100m
    int transmissionRange; //50 m
@@ -39,7 +45,7 @@ int main(nt argc, char *argv[])
 
 //==================================== Setting up grid with mobile nodes =======================================
    NodeContainer node_container;
-   node_container.create(10);
+   node_container.Create(numberOfNodes);
 
    MobilityHelper node_mobility;
    node_mobility.SetPositionAllocator ("ns3::RandomDiscPositionAllocator",
@@ -63,16 +69,18 @@ int main(nt argc, char *argv[])
 
    YansWifiPhyHelper wifi_phys_layer;   
    YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default ();
-   wifi_phys_layer.SetChannel(wifiChannel.create());
+   wifi_phys_layer.SetChannel(wifiChannel.Create());
 
    WifiMacHelper mac_layer;
    mac_layer.SetType("ns3::AdhocWifiMac");
+   // mac_layer.SetChannelAttribute ("DataRate", DataRateValue (5000000));
+   // mac_layer.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
 
    WifiHelper wifi;  
    wifi.SetStandard (WIFI_STANDARD_80211b);
    wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager", "DataMode", StringValue ("OfdmRate6Mbps"), "RtsCtsThreshold", UintegerValue (0));
 
-  devices = wifi.Install (wifiPhy, wifiMac, nodes); 
+  network_devices = wifi.Install (wifi_phys_layer, mac_layer, node_container); 
 
 //==================================== Setting up the internet stack =======================================
 
@@ -83,25 +91,38 @@ int main(nt argc, char *argv[])
   stack.SetRoutingHelper (aodv_protocol);
   stack.Install (node_container);
 
-  Ipv4AddressHelper address;
-  address.SetBase ("10.0.0.0", "255.0.0.0");
-  interfaces = address.Assign (devices);
+  Ipv4AddressHelper addresses;
+  addresses.SetBase ("10.0.0.0", "255.0.0.0");
+  interfaces = addresses.Assign (network_devices);
 
-  if (printRoutes)
-  {
-      Ptr<OutputStreamWrapper> routingStream = Create<OutputStreamWrapper> ("aodv.routes", std::ios::out);
-      aodv.PrintRoutingTableAllAt (Seconds (8), routingStream);
-  }
+//   if (printRoutes)
+//   {
+//       Ptr<OutputStreamWrapper> routingStream = Create<OutputStreamWrapper> ("aodv.routes", std::ios::out);
+//       aodv.PrintRoutingTableAllAt (Seconds (8), routingStream);
+//   }
 
 //==================================== Installing applications on the devices =======================================
 
-   
 
 //==================================== Initiate a conversation between two nodes =======================================
+   V4PingHelper ping (interfaces.GetAddress (4));
+   ping.SetAttribute ("Verbose", BooleanValue (true));
 
+   ApplicationContainer p = ping.Install (node_container.Get (0));
+   p.Start (Seconds (0));
+   p.Stop (Seconds (simulationTime) - Seconds (0.001));
 
+   AsciiTraceHelper ascii;
+   wifi_phys_layer.EnableAsciiAll (ascii.CreateFileStream ("aodv_sim.tr"));
+   wifi_phys_layer.EnablePcapAll ("aodv_sim", true);
 
+   // Ptr<FlowMonitor> flowmon;
+   // FlowMonitorHelper flowmonHelper;s
+   // flowmon = flowmonHelper.InstallAll ();
 
-
-
+   Simulator::Run ();
+   Simulator::Stop (Seconds (simulationTime));
+   Simulator::Destroy ();
+   
+   return 0;
 }
