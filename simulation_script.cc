@@ -30,19 +30,14 @@ NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
 int main(int argc, char **argv)
 {
    cout<<"Simulation starting now";
-   int numberOfNodes=5; //10
-   int simulationTime = 200; //200s
-   int simulationArea; //100 m x 100m
-   int transmissionRange = 50;//50 m
-   int node_speed = 1; // 1 m/s
+   int numberOfNodes=5;
+   int simulationTime = 200;
+   int transmissionRange = 50; //50 m
+   int node_speed = 1;
    int pause_time = 0;
    //Traffic type -> CBR (Constant Bit Rte)
-   //Routing protocol -> AODV
    string transmissio_rate = "DsssRate11Mbps";
-   int packetRate;  //11 Mbps
-   int packetSize;  // 1 kb
-   //MAC -> IEEE 802.11
-
+   int packetSize; 
 
 //==================================== Setting up grid with mobile nodes =======================================
    NodeContainer node_container;
@@ -50,8 +45,8 @@ int main(int argc, char **argv)
 
    MobilityHelper node_mobility;
 
-   //THis section specifes the mobility model for the nodes.
-   // Firts, the grid or simulation area is created through the posision allocator object
+   //This section specifies the mobility model for the nodes.
+   // First, the grid or simulation area is created through the posision allocator object
    // Then the posistion allocator is passed to the mobility model.
    // The nodes posisitions are allocated randomly within the grid.
    ObjectFactory pos;
@@ -75,13 +70,13 @@ int main(int argc, char **argv)
 //==================================== Installing devices and setting up the WiFi connection =======================================
 /*
    This section sets up the connection type between the nodes.
-   It specifies the physical layer and the data link layer
+   It specifies the physical layer and the mac link layer. The propagation delay and loss models are also specified
+   Once the physical and mac layers are set, these are installed to each node and stored as network devices on the netDeviceContainer 
 */
    NetDeviceContainer network_devices;
 
    // The following code creates a physical layer channel and
-   // specifies the propagation delay as well as the propagation
-   // loss models.
+   // 
    YansWifiPhyHelper phys_layer;
    YansWifiChannelHelper wifiChannel;
    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
@@ -92,7 +87,7 @@ int main(int argc, char **argv)
    WifiMacHelper mac_layer;
    mac_layer.SetType ("ns3::AdhocWifiMac");
 
-   //Specifying the connetion type.  Could be wifi = bluetooth e.t.c
+   //Specifying the connetion type. This could be wifi,bluetooth e.t.c
    WifiHelper wifi;  
    wifi.SetStandard (WIFI_STANDARD_80211b);
    wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
@@ -121,11 +116,8 @@ int main(int argc, char **argv)
 //       aodv.PrintRoutingTableAllAt (Seconds (8), routingStream);
 //   }
 
-//==================================== Installing applications on the devices =======================================
-
-
 //==================================== Initiate a conversation between two nodes =======================================
-   V4PingHelper ping (interfaces.GetAddress (4));
+   V4PingHelper ping (interfaces.GetAddress(node_container-1));
    ping.SetAttribute ("Verbose", BooleanValue (true));
 
    ApplicationContainer p = ping.Install (node_container.Get (0));
@@ -135,10 +127,6 @@ int main(int argc, char **argv)
    AsciiTraceHelper ascii;
    phys_layer.EnableAsciiAll (ascii.CreateFileStream ("aodv_sim.tr"));
    phys_layer.EnablePcapAll ("aodv_sim", true);
-
-   // Ptr<FlowMonitor> flowmon;
-   // FlowMonitorHelper flowmonHelper;s
-   // flowmon = flowmonHelper.InstallAll ();
 
    Simulator::Run ();
    Simulator::Stop (Seconds (simulationTime));
