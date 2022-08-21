@@ -19,11 +19,15 @@ the blackhole attack
 
 #include "ns3/v4ping-helper.h"
 
+#include "ns3/netanim-module.h"
+
 using namespace ns3;
 using namespace std;
 
 /*
-  script simulates a network topology where nodes are randomly positioned.
+  *script simulates a network topology where nodes are randomly positioned.
+  *Choosing node 2 as source to ensure enough space between the source and 
+   the destination to demostrate the necesary routing concepts.
 */
 NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
 
@@ -33,7 +37,7 @@ int main(int argc, char **argv)
    int numberOfNodes=5;
    int simulationTime = 200;
    int transmissionRange = 50; //50 m
-   int node_speed = 1;
+   int node_speed = 50;
    int pause_time = 0;
    //Traffic type -> CBR (Constant Bit Rte)
    string transmissio_rate = "DsssRate11Mbps";
@@ -51,7 +55,7 @@ int main(int argc, char **argv)
    // The nodes posisitions are allocated randomly within the grid.
    ObjectFactory pos;
    pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
-   pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=300.0]"));
+   pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
    pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
 
    Ptr<PositionAllocator> posAlloc = pos.Create ()->GetObject<PositionAllocator> ();
@@ -76,8 +80,14 @@ int main(int argc, char **argv)
    NetDeviceContainer network_devices;
 
    // The following code creates a physical layer channel and
-   // 
+   
    YansWifiPhyHelper phys_layer;
+   phys_layer.Set("TxGain",DoubleValue(0));  //transmission range of 50 meters
+   phys_layer.Set("RxGain",DoubleValue(0)); 
+   phys_layer.Set("TxPowerStart", DoubleValue(20));
+   phys_layer.Set("TxPowerEnd", DoubleValue(20));
+   phys_layer.Set("TxPowerLevels", UintegerValue(1));
+
    YansWifiChannelHelper wifiChannel;
    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
    wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
@@ -117,19 +127,67 @@ int main(int argc, char **argv)
 //   }
 
 //==================================== Initiate a conversation between two nodes =======================================
-   V4PingHelper ping (interfaces.GetAddress(node_container-1));
-   ping.SetAttribute ("Verbose", BooleanValue (true));
+// Install applocations at two nodes. ONe source and one destination node
 
-   ApplicationContainer p = ping.Install (node_container.Get (0));
-   p.Start (Seconds (0));
-   p.Stop (Seconds (simulationTime) - Seconds (0.001));
+// Setting up the source node to send off UDP packets
+   uint16_t port = 9;   // Discard port (RFC 863)
+   OnOffHelper onoff ("ns3::UdpSocketFactory", InetSocketAddress (interfaces.GetAddress (2), port));
+   onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
+   onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
+   onoff.SetAttribute ("PacketSize", UintegerValue (50));
+   onoff.SetConstantRate (DataRate ("2kbps"));
 
+
+
+  ApplicationContainer apps = onoff.Install (node_container.Get (2)); //First node as source (0 might create a loopback)
+  apps.Start (Seconds(100.0));
+  apps.Stop (Seconds(simulationTime));
+
+// Setting up the destination node to recieve UDP packets
+  PacketSinkHelper sink ("ns3::UdpSocketFactory",
+                         Address (InetSocketAddress (interfaces.GetAddress(numberOfNodes-1), port)));
+  apps = sink.Install (node_container.Get (numberOfNodes-1));  //Last node as destination
+  apps.Start (Seconds(100.0));
+  apps.Stop (Seconds(simulationTime));
+
+//==================================== Code for trace files =======================================
+
+   // Should also be able to print the selected route.
+   // Check RouteOutput() from the main file.
    AsciiTraceHelper ascii;
    phys_layer.EnableAsciiAll (ascii.CreateFileStream ("aodv_sim.tr"));
    phys_layer.EnablePcapAll ("aodv_sim", true);
 
+   AnimationInterface anim ("pure_aodv_animation.xml"); // Mandatory
+   for (int i = 0; i < numberOfNodes; i++)
+   {
+      if(i == 2)
+      {
+         string source_tag = "Source";
+         // string temp_addrss = "";
+         // interfaces.GetAddress(1).Print(temp_addrss);
+         anim.UpdateNodeDescription (node_container.Get(2), source_tag); 
+         anim.UpdateNodeColor (node_container.Get(2), 0,255, 0);  //Green
+      }
+      else if (i == numberOfNodes - 1)
+      {
+         anim.UpdateNodeDescription (node_container.Get(numberOfNodes-1), "Destination"); 
+         anim.UpdateNodeColor (node_container.Get(numberOfNodes - 1), 0,255, 0);  //Green
+      }
+      else
+      {
+         string node_tag = "N";
+         anim.UpdateNodeDescription(node_container.Get(i), node_tag.append(to_string(i))); 
+         // anim.UpdateNodeColor(node_container.Get(i), 255, 0, 0);
+      }
+   }
+   
+   //Mark the source and destination nodes with a different color
+
+   anim.EnablePacketMetadata (); // Optional
+
+   Simulator::Stop (Seconds(simulationTime));
    Simulator::Run ();
-   Simulator::Stop (Seconds (simulationTime));
    Simulator::Destroy ();
 
    return 0;
