@@ -135,7 +135,7 @@ int main(int argc, char **argv)
    onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
    onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
    onoff.SetAttribute ("PacketSize", UintegerValue (50));
-   onoff.SetConstantRate (DataRate ("2kbps"));
+   // onoff.SetConstantRate (DataRate ("2kbps"));
 
 
 
