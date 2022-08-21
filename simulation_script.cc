@@ -39,7 +39,6 @@ int main(int argc, char **argv)
    int transmissionRange = 50; //50 m
    int node_speed = 50;
    int pause_time = 0;
-   //Traffic type -> CBR (Constant Bit Rte)
    string transmissio_rate = "DsssRate11Mbps";
    int packetSize; 
 
@@ -78,11 +77,9 @@ int main(int argc, char **argv)
    Once the physical and mac layers are set, these are installed to each node and stored as network devices on the netDeviceContainer 
 */
    NetDeviceContainer network_devices;
-
-   // The following code creates a physical layer channel and
    
    YansWifiPhyHelper phys_layer;
-   phys_layer.Set("TxGain",DoubleValue(0));  //transmission range of 50 meters
+   phys_layer.Set("TxGain",DoubleValue(0));  //transmission range of 20 meters
    phys_layer.Set("RxGain",DoubleValue(0)); 
    phys_layer.Set("TxPowerStart", DoubleValue(20));
    phys_layer.Set("TxPowerEnd", DoubleValue(20));
@@ -127,7 +124,6 @@ int main(int argc, char **argv)
 //   }
 
 //==================================== Initiate a conversation between two nodes =======================================
-// Install applocations at two nodes. ONe source and one destination node
 
 // Setting up the source node to send off UDP packets
    uint16_t port = 9;   // Discard port (RFC 863)
@@ -136,8 +132,6 @@ int main(int argc, char **argv)
    onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
    onoff.SetAttribute ("PacketSize", UintegerValue (50));
    // onoff.SetConstantRate (DataRate ("2kbps"));
-
-
 
   ApplicationContainer apps = onoff.Install (node_container.Get (2)); //First node as source (0 might create a loopback)
   apps.Start (Seconds(100.0));
@@ -178,11 +172,8 @@ int main(int argc, char **argv)
       {
          string node_tag = "N";
          anim.UpdateNodeDescription(node_container.Get(i), node_tag.append(to_string(i))); 
-         // anim.UpdateNodeColor(node_container.Get(i), 255, 0, 0);
       }
    }
-   
-   //Mark the source and destination nodes with a different color
 
    anim.EnablePacketMetadata (); // Optional
 
