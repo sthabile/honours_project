@@ -31,19 +31,23 @@ using namespace std;
 */
 NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
 
+/**
+ * This function basically prints out the packet received from a particular socket.
+ * */
 void ReceivePacket(Ptr<Socket> socket)
 {
    Ptr<Packet> packet;
    Address senderAddress;
    while(packet == socket -> RecvFrom(senderAddress))
    {
-      // m_bytesTotal += packet->GetSize ();
-      // m_packetsReceived +=1;
-     //Print the packet!
      cout<< "Hypothetically printing the contents of the packet";
    }
 }
-
+/**
+ * This function essentially opens a socket and binds it to and address.
+ * This allows the a device to comminicate with other devices on the application
+ * level.
+ */
 Ptr<Socket> SetupPacketReceive(Ipv4Address addr, Ptr<Node> node, uint16_t port)
 {
    NS_LOG_INFO("Setup event for packets received");
