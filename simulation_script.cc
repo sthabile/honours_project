@@ -31,11 +31,38 @@ using namespace std;
 */
 NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
 
+void ReceivePacket(Ptr<Socket> socket)
+{
+   Ptr<Packet> packet;
+   Address senderAddress;
+   while(packet == socket -> RecvFrom(senderAddress))
+   {
+      // m_bytesTotal += packet->GetSize ();
+      // m_packetsReceived +=1;
+     //Print the packet!
+     cout<< "Hypothetically printing the contents of the packet";
+   }
+}
+
+Ptr<Socket> SetupPacketReceive(Ipv4Address addr, Ptr<Node> node, uint16_t port)
+{
+   NS_LOG_INFO("Setup event for packets received");
+
+   TypeId tid = TypeId::LookupByName("ns3::UdpSocketFactory");
+   Ptr<Socket> sink = Socket::CreateSocket(node,tid);
+   InetSocketAddress local = InetSocketAddress(addr, port);
+   sink-> Bind(local);
+   // sink->SetRecvCallback(MakeCallback(ReceivePacket, sink));
+
+   return sink;
+}
+
 int main(int argc, char **argv)
 {
    cout<<"Simulation starting now";
    int numberOfNodes=5;
-   int simulationTime = 200;
+   int simulationTime = 100;
+   int networkSetUpTime = simulationTime/2;
    int transmissionRange = 50; //50 m
    int node_speed = 50;
    int pause_time = 0;
@@ -54,8 +81,8 @@ int main(int argc, char **argv)
    // The nodes posisitions are allocated randomly within the grid.
    ObjectFactory pos;
    pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
-   pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
-   pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
+   pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+   pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
 
    Ptr<PositionAllocator> posAlloc = pos.Create ()->GetObject<PositionAllocator> ();
 
@@ -79,10 +106,10 @@ int main(int argc, char **argv)
    NetDeviceContainer network_devices;
    
    YansWifiPhyHelper phys_layer;
-   phys_layer.Set("TxGain",DoubleValue(0));  //transmission range of 20 meters
+   phys_layer.Set("TxGain",DoubleValue(0));
    phys_layer.Set("RxGain",DoubleValue(0)); 
-   phys_layer.Set("TxPowerStart", DoubleValue(20));
-   phys_layer.Set("TxPowerEnd", DoubleValue(20));
+   phys_layer.Set("TxPowerStart", DoubleValue(10)); //Was 20
+   phys_layer.Set("TxPowerEnd", DoubleValue(10));
    phys_layer.Set("TxPowerLevels", UintegerValue(1));
 
    YansWifiChannelHelper wifiChannel;
@@ -110,11 +137,11 @@ int main(int argc, char **argv)
   Ipv4InterfaceContainer interfaces;
 
   InternetStackHelper stack;
-  stack.SetRoutingHelper (aodv_protocol);
-  stack.Install (node_container);
+  stack.SetRoutingHelper(aodv_protocol);
+  stack.Install(node_container);
 
   Ipv4AddressHelper addresses;
-  addresses.SetBase ("10.0.0.0", "255.0.0.0");
+  addresses.SetBase("10.1.1.0", "255.255.255.0");
   interfaces = addresses.Assign (network_devices);
 
 //   if (printRoutes)
@@ -125,24 +152,21 @@ int main(int argc, char **argv)
 
 //==================================== Initiate a conversation between two nodes =======================================
 
-// Setting up the source node to send off UDP packets
+
    uint16_t port = 9;   // Discard port (RFC 863)
-   OnOffHelper onoff ("ns3::UdpSocketFactory", InetSocketAddress (interfaces.GetAddress (2), port));
+   OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
    onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
    onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
-   onoff.SetAttribute ("PacketSize", UintegerValue (50));
-   // onoff.SetConstantRate (DataRate ("2kbps"));
 
-  ApplicationContainer apps = onoff.Install (node_container.Get (2)); //First node as source (0 might create a loopback)
-  apps.Start (Seconds(100.0));
-  apps.Stop (Seconds(simulationTime));
+// Setting up the destination node to handle UDP packets
+   Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(numberOfNodes-1),node_container.Get(numberOfNodes-1), port);
+   AddressValue remoteAddress (InetSocketAddress (interfaces.GetAddress(numberOfNodes-1), port));
+   onoff.SetAttribute("Remote", remoteAddress);
 
-// Setting up the destination node to recieve UDP packets
-  PacketSinkHelper sink ("ns3::UdpSocketFactory",
-                         Address (InetSocketAddress (interfaces.GetAddress(numberOfNodes-1), port)));
-  apps = sink.Install (node_container.Get (numberOfNodes-1));  //Last node as destination
-  apps.Start (Seconds(100.0));
-  apps.Stop (Seconds(simulationTime));
+// Installing an OnOff application on the source node so it can send UDP packets 
+   ApplicationContainer apps = onoff.Install (node_container.Get (0));
+   apps.Start (Seconds(networkSetUpTime));
+   apps.Stop (Seconds(simulationTime));
 
 //==================================== Code for trace files =======================================
 
@@ -155,15 +179,15 @@ int main(int argc, char **argv)
    AnimationInterface anim ("pure_aodv_animation.xml"); // Mandatory
    for (int i = 0; i < numberOfNodes; i++)
    {
-      if(i == 2)
+      if(i == 0)
       {
          string source_tag = "Source";
          // string temp_addrss = "";
          // interfaces.GetAddress(1).Print(temp_addrss);
-         anim.UpdateNodeDescription (node_container.Get(2), source_tag); 
-         anim.UpdateNodeColor (node_container.Get(2), 0,255, 0);  //Green
+         anim.UpdateNodeDescription (node_container.Get(0), source_tag); 
+         anim.UpdateNodeColor (node_container.Get(0), 0,255, 0);  //Green
       }
-      else if (i == numberOfNodes - 1)
+      else if (i == (numberOfNodes - 1))
       {
          anim.UpdateNodeDescription (node_container.Get(numberOfNodes-1), "Destination"); 
          anim.UpdateNodeColor (node_container.Get(numberOfNodes - 1), 0,255, 0);  //Green
