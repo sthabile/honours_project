@@ -1,3 +1,19 @@
+
+/**
+ * @file sim_scrpt_oo.cc
+ * @author Sthabile Lushaba (sthabile.nature@gmail.com)
+ * @brief This script aims to simulate a generic mobile peer-to-peer network
+ * where nodes are connected via WI-FI, in an ad-hoc manner. The basic structure
+ * follows the example found in examples\routig\manet-routing-compare.cc
+ * Some of the functions were taken from that example script.
+ * @version 0.1
+ * @date 2022-09-08
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
+
 #include <fstream>
 #include <iostream>
 #include "ns3/core-module.h"
@@ -62,6 +78,7 @@ class PureAodvRouting
         int packetSize;
         string protocolName;
         string CSVfileName;
+        string dataRate;
 };
 
 /**
@@ -86,11 +103,14 @@ ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot
   for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
     {
       Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-      if(t.sourceAddress==Ipv4Address("10.1.1.1") && t.destinationAddress==Ipv4Address("10.1.1.10"))  //MUST BE FOR THE SPECIFIC NODES
+      if(t.sourceAddress==Ipv4Address("10.1.1.1") && t.destinationAddress==Ipv4Address("10.1.1.20"))  //MUST BE FOR THE SPECIFIC NODES
       {
         std::cout << "Flow ID:    " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n";
-        std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";        
-        std::cout << "  Rx Bytes:   " << i->second.rxBytes << "\n";
+        std::cout << "Transmitted Bytes:   " << i->second.txBytes << "\n";        
+        std::cout << "Recieved Bytes:   " << i->second.rxBytes << "\n";
+        std::cout << "Transmitted Packets:   " << i->second.rxPackets << "\n";
+        std::cout << "Recieved Packets:   " << i->second.rxPackets << "\n";
+        std::cout << "Recieved Packets:   " << i->second.rxPackets << "\n";
         std::cout <<"Duration   : "<<(i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())<<std::endl;
         std::cout <<"Last Received Packet : "<< i->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
         std::cout <<"Throughput: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps\n";
@@ -152,7 +172,7 @@ PureAodvRouting::CheckThroughput ()
   out << (Simulator::Now ()).GetSeconds () << ","
       << kbs << ","
       << packetsReceived << ","
-      << protocolName << ","s
+      << protocolName << ","
       << std::endl;
 
   out.close ();
@@ -175,16 +195,17 @@ PureAodvRouting::SetupPacketReceive (Ipv4Address addr, Ptr<Node> node)
 void
 PureAodvRouting::SetUp()
 {
-    numberOfNodes=10;
+    numberOfNodes=20;
     simulationTime = 200;
     networkSetUpTime = simulationTime/2;
     transmissionRange = 50;
     nodeSpeed = 50;
     pauseTime = 0;
     transmissionRate = "DsssRate11Mbps";
-    packetSize;
+    packetSize = 64;
     protocolName = "AODV_PURE";
     CSVfileName = "pure_aodv_sim.csv";
+    dataRate = "2048bps";
 }
 
 
@@ -254,8 +275,10 @@ PureAodvRouting::Run()
     interfaces = addresses.Assign (network_devices);
 
     OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
-    onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
-    onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
+    onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+    onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
+    onoff.SetAttribute ("PacketSize", StringValue("2048"));
+    onoff.SetAttribute ("DataRate", StringValue(dataRate));
 
 // Setting up the destination node to handle UDP packets
     Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(numberOfNodes-1),nodeContainer.Get(numberOfNodes-1));
@@ -309,12 +332,16 @@ PureAodvRouting::Run()
     dataset.SetTitle ("Throughput");
     dataset.SetStyle (Gnuplot2dDataset::LINES_POINTS);
 
+//    dataset.Add(299,0.315);
+//    dataset.Add(298,0.314);
+
     //used for create gnuplot file to show performance figure of Packet loss
 
     Gnuplot gnuplot1 ("packetloss.png");
     gnuplot1.SetTitle ("packetloss.plt");
     gnuplot1.SetTerminal("png");
     gnuplot1.SetLegend("Simulation time in seconds", "Number of packet loss");//set labels for each axis
+    // gnuplot1.AppendExtra("set xrange [199: 205]");
     Gnuplot2dDataset dataset1;
     dataset1.SetTitle ("Packetloss");
     dataset1.SetStyle (Gnuplot2dDataset::LINES_POINTS);
