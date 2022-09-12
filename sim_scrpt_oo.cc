@@ -6,7 +6,7 @@
  * where nodes are connected via WI-FI, in an ad-hoc manner. The basic structure
  * follows the example found in examples\routig\manet-routing-compare.cc
  * Some of the functions were taken from that example script.
- * @version 0.1
+ * @version 0.1.1
  * @date 2022-09-08
  * 
  * @copyright Copyright (c) 2022
@@ -95,7 +95,7 @@ ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot
   double packetloss = 0;
   double delay = 0;
 
-  std::cout<< "========================= COLLECTING NETWORK PERFORMANCE WITH FLOWMONITOR========================\n";
+  std::cout<< "========================= COLLECTING NETWORK PERFORMANCE WITH FLOWMONITOR 10 ========================\n";
 
   std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
   Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier ());
@@ -103,7 +103,7 @@ ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot
   for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
     {
       Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-      if(t.sourceAddress==Ipv4Address("10.1.1.1") && t.destinationAddress==Ipv4Address("10.1.1.20"))  //MUST BE FOR THE SPECIFIC NODES
+      if(t.sourceAddress==Ipv4Address("10.1.1.1") && t.destinationAddress==Ipv4Address("10.1.1.10"))  //MUST BE FOR THE SPECIFIC NODES
       {
         std::cout << "Flow ID:    " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n";
         std::cout << "Transmitted Bytes:   " << i->second.txBytes << "\n";        
@@ -113,12 +113,12 @@ ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot
         std::cout << "Recieved Packets:   " << i->second.rxPackets << "\n";
         std::cout <<"Duration   : "<<(i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())<<std::endl;
         std::cout <<"Last Received Packet : "<< i->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
-        std::cout <<"Throughput: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps\n";
+        std::cout <<"Throughput: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())<< " bps\n";
         std::cout <<"Average delay: "<< (i->second.delaySum.GetSeconds()/i->second.rxPackets)<<std::endl;
         std::cout <<"Packet drop: "<<i->second.lostPackets<<"\n";
         std::cout<<"---------------------------------------------------------------------------"<<std::endl;
         
-        Throughput = (i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())/1024/1024  );
+        Throughput = (i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds()));
         packetloss = (i->second.lostPackets);
         delay = (i->second.delaySum.GetDouble()/i->second.rxPackets);
         //update gnuplot file data
@@ -174,6 +174,11 @@ PureAodvRouting::CheckThroughput ()
       << packetsReceived << ","
       << protocolName << ","
       << std::endl;
+  // cout << "=======================";
+  // cout << (Simulator::Now ()).GetSeconds ();
+  // cout << kbs << ",";
+  // cout << packetsReceived << ",";
+  // cout << protocolName << ",";
 
   out.close ();
   packetsReceived = 0;
@@ -195,7 +200,7 @@ PureAodvRouting::SetupPacketReceive (Ipv4Address addr, Ptr<Node> node)
 void
 PureAodvRouting::SetUp()
 {
-    numberOfNodes=20;
+    numberOfNodes=10;
     simulationTime = 200;
     networkSetUpTime = simulationTime/2;
     transmissionRange = 50;
@@ -281,19 +286,19 @@ PureAodvRouting::Run()
     onoff.SetAttribute ("DataRate", StringValue(dataRate));
 
 // Setting up the destination node to handle UDP packets
-    Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(numberOfNodes-1),nodeContainer.Get(numberOfNodes-1));
-    AddressValue remoteAddress (InetSocketAddress (interfaces.GetAddress(numberOfNodes-1), port));
+    Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(9),nodeContainer.Get(9));
+    AddressValue remoteAddress (InetSocketAddress (interfaces.GetAddress(9), port)); //Node 9 as the destination
     onoff.SetAttribute("Remote", remoteAddress);
 
 // Installing an application at the source node
-    ApplicationContainer apps = onoff.Install(nodeContainer.Get(0));
+    ApplicationContainer apps = onoff.Install(nodeContainer.Get(0)); //Node 0 as source
     apps.Start(Seconds(0));
     apps.Stop(Seconds(simulationTime));
 
 // Tracing using Anim
     AsciiTraceHelper ascii;
-    phys_layer.EnableAsciiAll (ascii.CreateFileStream ("pure_aodv_sim.tr"));
-    phys_layer.EnablePcapAll ("pure_aodv_sim", true);
+    //phys_layer.EnableAsciiAll (ascii.CreateFileStream ("pure_aodv_sim.tr"));
+    //phys_layer.EnablePcapAll ("pure_aodv_sim", true);
 
     AnimationInterface anim ("pure_aodv_animation.xml"); // Mandatory
     for (int i = 0; i < numberOfNodes; i++)
@@ -302,12 +307,12 @@ PureAodvRouting::Run()
         {
             string source_tag = "Source";
             anim.UpdateNodeDescription (nodeContainer.Get(0), source_tag); 
-            anim.UpdateNodeColor (nodeContainer.Get(0), 0,255, 0);  //Green
+            anim.UpdateNodeColor (nodeContainer.Get(0), 0,255, 0);  //Green  
         }
         else if (i == (numberOfNodes - 1))
         {
             anim.UpdateNodeDescription (nodeContainer.Get(numberOfNodes-1), "Destination"); 
-            anim.UpdateNodeColor (nodeContainer.Get(numberOfNodes - 1), 0,255, 0);  //Green
+            anim.UpdateNodeColor (nodeContainer.Get(9), 0,255, 0);  //Green
         }
         else
         {
