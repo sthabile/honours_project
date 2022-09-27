@@ -77,11 +77,16 @@ class PureAodvRouting
         int transmissionRange;
         int nodeSpeed;
         int pauseTime;
+        int transmission_power;
         string transmissionRate;
         string packetSize;
         string protocolName;
         string CSVfileName;
         string dataRate;
+        bool setMalicious;
+
+        Gnuplot gnuplot;
+        Gnuplot2dDataset dataSet;
 };
 
 /**
@@ -89,49 +94,6 @@ class PureAodvRouting
  */
 PureAodvRouting::PureAodvRouting ()
 {
-}
-
-static void
-ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot2dDataset DataSet, Gnuplot2dDataset DataSet1, Gnuplot2dDataset DataSet2)
-{
-  double Throughput = 0;
-  double packetloss = 0;
-  double delay = 0;
-
-  std::cout<< "========================= COLLECTING NETWORK PERFORMANCE WITH FLOWMONITOR 10 ========================\n";
-
-  std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
-  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier ());
-
-  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
-    {
-      Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-      if(t.sourceAddress==Ipv4Address("10.1.1.1") && t.destinationAddress==Ipv4Address("10.1.1.10"))  //MUST BE FOR THE SPECIFIC NODES
-      {
-        std::cout << "Flow ID:    " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n";
-        std::cout << "Transmitted Bytes:   " << i->second.txBytes << "\n";        
-        std::cout << "Recieved Bytes:   " << i->second.rxBytes << "\n";
-        std::cout << "Transmitted Packets:   " << i->second.rxPackets << "\n";
-        std::cout << "Recieved Packets:   " << i->second.rxPackets << "\n";
-        std::cout << "Recieved Packets:   " << i->second.rxPackets << "\n";
-        std::cout <<"Duration   : "<<(i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())<<std::endl;
-        std::cout <<"Last Received Packet : "<< i->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
-        std::cout <<"Throughput: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())/1000000<< " Mbps\n";
-        std::cout <<"Average delay: "<< (i->second.delaySum.GetSeconds()/i->second.rxPackets)<<std::endl;
-        std::cout <<"Packet drop: "<<i->second.lostPackets<<"\n";
-        std::cout<<"---------------------------------------------------------------------------"<<std::endl;
-        
-        Throughput = (i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())) /1000000; //Convert to Mbps
-        packetloss = (i->second.lostPackets);  //Packets lost during this flow
-        delay = (i->second.delaySum.GetDouble()/i->second.rxPackets); //Average delay
-        //update gnuplot file data
-        DataSet.Add((double)Simulator::Now().GetSeconds(), (double) Throughput);
-        DataSet1.Add((double)Simulator::Now().GetSeconds(), (double) packetloss);
-        DataSet2.Add((double)Simulator::Now().GetSeconds(), (double) delay);
-      }
-    }
-
-    Simulator::Schedule(Seconds(1), &ThroughputMonitor,fmhelper,monitor,DataSet,DataSet1,DataSet2);
 }
 
 static inline std::string
@@ -171,15 +133,21 @@ PureAodvRouting::ReceivePacket (Ptr<Socket> socket)
 void
 PureAodvRouting::CheckThroughput ()
 {
-  double kbs = (bytesTotal * 8.0) / 1000;  //killobits
+  double kiloBits = (bytesTotal * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
   bytesTotal = 0;
 
   std::ofstream out (CSVfileName.c_str (), std::ios::app);
 
-  out << (Simulator::Now ()).GetSeconds () << ","
-      << kbs << std::endl;
+  int32_t current_time = (int32_t)(Simulator::Now ()).GetSeconds ();
+
+  out << current_time<< ","
+      << packetsReceived << ","
+      << kiloBits << std::endl;
 
   out.close ();
+
+  dataSet.Add(current_time, (double) (kiloBits));
+
   packetsReceived = 0;
   Simulator::Schedule (Seconds (1.0), &PureAodvRouting::CheckThroughput, this);
 }
@@ -201,19 +169,32 @@ PureAodvRouting::SetUp(/*int argc, char *argv[]*/)
 {
 
   // CommandLine cmd (__FILE__);
-  // cmd.AddValue("numberOfNodes","THe number of nodes in the network", numberOfNodes);
+  // cmd.AddValue("numberOfNodes","The number of nodes in the network", numberOfNodes);
   // cmd.Parse (argc, argv);
   numberOfNodes=10;
   simulationTime = 200;
-  networkSetUpTime = simulationTime/2;
+  networkSetUpTime = 50;
   transmissionRange = 50;
-  nodeSpeed = 50;
+  nodeSpeed = 20; //meters per second
   pauseTime = 0;
+  transmission_power = 20; // dBm (decibel-miliwatt) 
   transmissionRate = "DsssRate11Mbps";
-  packetSize = "521";  //Following the work of Ndajah et.al
+  packetSize = "64";  //
   protocolName = "AODV_PURE";
-  CSVfileName = "pure_aodv_sim.csv";
-  dataRate = "2048bps";  //Not
+  CSVfileName = "blackhole_aodv_sim.csv";
+  dataRate = "2048bps";  //
+  setMalicious = false;  //false by default
+
+
+  // Gnuplot gnuplot ("throughput.png");
+  gnuplot.SetOutputFilename("throughput.png");
+  gnuplot.SetTitle ("throughput.plt");
+  gnuplot.SetTerminal("png");
+  gnuplot.SetLegend("Simulation time (Seconds)", "Throughput(Kbps)");//set labels for each axis
+  
+  dataSet.SetTitle ("Throughput");
+  dataSet.SetStyle (Gnuplot2dDataset::LINES);
+
 }
 
 
@@ -221,7 +202,25 @@ void
 PureAodvRouting::Run()
 {
     NodeContainer nodeContainer;
+    NodeContainer maliciousNodes;
+    NodeContainer nonMaliciousNodes;
+
     nodeContainer.Create(numberOfNodes);
+
+    if(setMalicious){
+      for(int i =0; i< numberOfNodes; i++)  //Just one malicious node for now
+      {
+        if(i != (numberOfNodes/2)) // Pick the middle node as malicious
+        {   
+          nonMaliciousNodes.Add(nodeContainer.Get(i));
+        }
+        else
+        {
+          maliciousNodes.Add(nodeContainer.Get(i));
+        }
+      }
+    }
+
 
 // Position nodes on the simulation area
     MobilityHelper nodeMobility;
@@ -247,10 +246,8 @@ PureAodvRouting::Run()
     NetDeviceContainer network_devices;
    
     YansWifiPhyHelper phys_layer;
-    phys_layer.Set("TxGain",DoubleValue(0));
-    phys_layer.Set("RxGain",DoubleValue(0)); 
-    phys_layer.Set("TxPowerStart", DoubleValue(20));
-    phys_layer.Set("TxPowerEnd", DoubleValue(20));
+    phys_layer.Set("TxPowerStart", DoubleValue(transmission_power));
+    phys_layer.Set("TxPowerEnd", DoubleValue(transmission_power));
     phys_layer.Set("TxPowerLevels", UintegerValue(1));
 
     YansWifiChannelHelper wifiChannel;
@@ -272,11 +269,24 @@ PureAodvRouting::Run()
 
 // Specify the internet stack
     AodvHelper aodv_protocol;
-    Ipv4InterfaceContainer interfaces;
+    AodvHelper aodv_protocol_malicious;
 
+    Ipv4InterfaceContainer interfaces;
     InternetStackHelper stack;
-    stack.SetRoutingHelper(aodv_protocol);
-    stack.Install(nodeContainer);
+
+    if(setMalicious){
+      stack.SetRoutingHelper(aodv_protocol);
+      stack.Install(nonMaliciousNodes);
+
+      aodv_protocol_malicious.Set("IsMalicious",BooleanValue(true));  //Turn on malicious behaviour for the rest of the nodes
+      stack.SetRoutingHelper(aodv_protocol_malicious);
+      stack.Install(maliciousNodes);
+    }
+    else
+    {
+      stack.SetRoutingHelper(aodv_protocol);
+      stack.Install(nodeContainer);
+    }
 
     Ipv4AddressHelper addresses;
     addresses.SetBase("10.1.1.0", "255.255.255.0");
@@ -287,8 +297,8 @@ PureAodvRouting::Run()
     OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
     onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
     onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
-    // onoff.SetAttribute ("PacketSize", StringValue(packe));
-    // onoff.SetAttribute ("DataRate", StringValue(dataRate));
+    onoff.SetAttribute ("PacketSize", StringValue(packetSize));
+    onoff.SetAttribute ("DataRate", StringValue(dataRate));
 
 // Setting up the destination node to handle UDP packets
     Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(9),nodeContainer.Get(9));
@@ -297,7 +307,7 @@ PureAodvRouting::Run()
 
 // Installing an application at the source node
     ApplicationContainer apps = onoff.Install(nodeContainer.Get(0)); //Node 0 as source
-    apps.Start(Seconds(1));
+    apps.Start(Seconds(networkSetUpTime));  // Allow nodes to get scattered across the simulation area 
     apps.Stop(Seconds(simulationTime));
 
 // Tracing using Anim
@@ -314,10 +324,15 @@ PureAodvRouting::Run()
             anim.UpdateNodeDescription (nodeContainer.Get(0), source_tag); 
             anim.UpdateNodeColor (nodeContainer.Get(0), 0,255, 0);  //Green  
         }
-        else if (i == (numberOfNodes - 1))
+        else if (i == 9)
         {
-            anim.UpdateNodeDescription (nodeContainer.Get(numberOfNodes-1), "Destination"); 
+            anim.UpdateNodeDescription (nodeContainer.Get(9), "Destination"); 
             anim.UpdateNodeColor (nodeContainer.Get(9), 0,255, 0);  //Green
+        }
+        else if (setMalicious && i == (numberOfNodes/2))
+        {
+            anim.UpdateNodeDescription (nodeContainer.Get(numberOfNodes/2), "Malicious"); 
+            anim.UpdateNodeColor (nodeContainer.Get(numberOfNodes/2), 0,0, 0);  //Green
         }
         else
         {
@@ -332,15 +347,6 @@ PureAodvRouting::Run()
     FlowMonitorHelper fmHelper;
     Ptr<FlowMonitor> flwMon = fmHelper.InstallAll();
 
-    //Prep for plots
-    //Setup for figures showing network performance
-    Gnuplot gnuplot ("throughput.png");
-    gnuplot.SetTitle ("throughput.plt");
-    gnuplot.SetTerminal("png");
-    gnuplot.SetLegend("Simulation time in seconds", "Throughput");//set labels for each axis
-    Gnuplot2dDataset dataset;
-    dataset.SetTitle ("Throughput");
-    dataset.SetStyle (Gnuplot2dDataset::LINES_POINTS);
 
     //used for create gnuplot file to show performance figure of Packet loss
 
@@ -365,17 +371,17 @@ PureAodvRouting::Run()
     CheckThroughput();
 
 //Start the simulation
-    Simulator::Stop(Seconds(simulationTime));
+    Simulator::Stop(Seconds(simulationTime + networkSetUpTime)); //Leave extra time for queueing packet to be processed
     Simulator::Run();
 
 //More Flowmon tracing
     flwMon -> CheckForLostPackets();
-    flwMon -> SerializeToXmlFile("aodvflow.xml",true,false);
+    flwMon -> SerializeToXmlFile("pure_aodvflow.xml",true,false);
 
-    ThroughputMonitor(&fmHelper,flwMon,dataset,dataset1,dataset2);
+   // ThroughputMonitor(&fmHelper,flwMon,dataset,dataset1,dataset2);
 
 // Ploting using gnuplots
-    gnuplot.AddDataset(dataset);
+    gnuplot.AddDataset(dataSet);
     std::ofstream plotFile ("throughput.plt");
     gnuplot.GenerateOutput (plotFile);
     plotFile.close ();
