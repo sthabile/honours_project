@@ -87,7 +87,7 @@ class AodvRoutingSimulation
          * per second. Each metric is collected and stored in 
          * an external dataset file.
          */
-        void CheckThroughput ();
+        void CheckPerformance ();
 
         /**
          * @brief Function for initialising datasets
@@ -103,11 +103,11 @@ class AodvRoutingSimulation
 //                 PRIVATE VARIABLES
 //============================================================================================
         uint32_t port;                   // Receiving port number.
-        uint32_t bytesTotal;             // Total received bytes. (per session)
+        uint32_t bytesPerSec;             // Total received bytes. (per session)
         uint32_t networkBytesTotal;      // Overall bytes recieved (entire network simulation)
-        uint32_t packetsReceived;        // Total received packets.
+        uint32_t packetsReceivedPerSec;  // Total received packets.
         uint32_t networkPacketsReceived; // Overall received packets.(entire network simulation)
-        uint32_t packetExchangeStartTime;
+        double packetExchangeStartTime;
 
 
         int numberOfNodes;
@@ -140,7 +140,7 @@ AodvRoutingSimulation::AodvRoutingSimulation ()
 }
 
 static inline std::string
-PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddress, uint32_t bytesTotal)
+PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddress, uint32_t bytesPerSec)
 {
   std::ostringstream oss;
 
@@ -150,7 +150,7 @@ PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddre
     {
       InetSocketAddress addr = InetSocketAddress::ConvertFrom (senderAddress);
       oss << " received one packet from " << addr.GetIpv4 ()<<"\n";
-      oss << "Total bytes : "<< bytesTotal;
+      oss << "Total bytes : "<< bytesPerSec;
     }
   else
     {
@@ -160,35 +160,47 @@ PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddre
   return oss.str ();
 }
 
+/**
+ * @brief socket->RecvFrom() returns a single packet from the socket
+ * and also retreive the sender address.
+ * @param socket 
+ */
 void
 AodvRoutingSimulation::ReceivePacket (Ptr<Socket> socket)
 {
   Ptr<Packet> packet;
   Address senderAddress;
-  while ((packet = socket->RecvFrom (senderAddress)))
+  packet = socket->RecvFrom (senderAddress);
+  
+  bytesPerSec += packet->GetSize ();
+  networkBytesTotal += packet->GetSize();
+  packetsReceivedPerSec += 1;
+  networkPacketsReceived +=1;
+
+  if(networkPacketsReceived == 50 )
   {
-      bytesTotal += packet->GetSize ();
-      networkBytesTotal += packet->GetSize();
-      packetsReceived += 1;
-      networkPacketsReceived +=1;
-      NS_LOG_UNCOND (PrintReceivedPacket (socket, packet, senderAddress, bytesTotal));
+    SeqTsSizeHeader hd;
+    packet -> PeekHeader(hd);
+    packetExchangeStartTime = (double)hd.GetTs().GetSeconds();
   }
+  NS_LOG_UNCOND (PrintReceivedPacket (socket, packet, senderAddress, bytesPerSec)); 
+
 }
 
 void
-AodvRoutingSimulation::CheckThroughput ()
+AodvRoutingSimulation::CheckPerformance ()
 {
-  u_int32_t tempBytes = bytesTotal;
+  u_int32_t tempBytes = bytesPerSec;
 
-  double kiloBits = (bytesTotal * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
-  bytesTotal = 0;
+  double kiloBits = (bytesPerSec * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
+  bytesPerSec = 0;
 
   std::ofstream out ((scenario+ CSVfileName).c_str (), std::ios::app);
 
   int32_t current_time = (int32_t)(Simulator::Now ()).GetSeconds ();
 
   out << current_time<< ","
-      << packetsReceived << ","
+      << packetsReceivedPerSec << ","
       << kiloBits << std::endl;
   out.close ();
 
@@ -201,8 +213,8 @@ AodvRoutingSimulation::CheckThroughput ()
 
   NS_LOG_UNCOND(oss.str());
 
-  packetsReceived = 0;
-  Simulator::Schedule (Seconds(1.0), &AodvRoutingSimulation::CheckThroughput, this);
+  packetsReceivedPerSec = 0;
+  Simulator::Schedule (Seconds(1.0), &AodvRoutingSimulation::CheckPerformance, this);
 }
 
 Ptr<Socket>
@@ -234,12 +246,12 @@ AodvRoutingSimulation::SetUp(){
     protocolName = "AODV_PURE";
     CSVfileName = "_sim.csv";
     dataRate = "2048bps";  
-    setMalicious = true;  
+    setMalicious = false;  
 
     port =  9;  
-    bytesTotal = 0;     
+    bytesPerSec = 0;     
     networkBytesTotal = 0;
-    packetsReceived = 0 ; 
+    packetsReceivedPerSec = 0 ; 
     networkPacketsReceived = 0;
     packetExchangeStartTime = 0;
 
@@ -256,7 +268,7 @@ AodvRoutingSimulation::setUpDataSets(){
     gnuplot.SetLegend("Simulation time (Seconds)", "Throughput(Kbps)");
     
     dataSet.SetTitle ("Throughput");
-    dataSet.SetStyle (Gnuplot2dDataset::LINES);
+    dataSet.SetStyle (Gnuplot2dDataset::LINES_POINTS);
 
     //For Packetloss
     gnuplot1.SetOutputFilename("packetloss.png");
@@ -314,8 +326,6 @@ AodvRoutingSimulation::Run()
   nodeContainer.Create(numberOfNodes);
 
   if(setMalicious){
-    oss<< "Setting up 3 malicious nodes";
-    NS_LOG_UNCOND(oss.str());
     for(int i =0; i< numberOfNodes; i++) 
     {
       if(i != 8 && i != numberOfNodes/2 && i != numberOfNodes/4) 
@@ -495,28 +505,28 @@ AodvRoutingSimulation::Run()
   FlowMonitorHelper fmHelper;
   Ptr<FlowMonitor> flwMon = fmHelper.InstallAll();
 
-  CheckThroughput();
+  CheckPerformance();
 
 //============================================================================================
 //             SETTING UP SIMULATION START AND STOP SETTINGS
 //============================================================================================
-  Simulator::Stop(Seconds(simulationTime + networkSetUpTime));
+  Simulator::Stop(Seconds(simulationTime + 0.3));
   Simulator::Run();
-
-
 
 //============================================================================================
 //             FLOWMONITOR DATA COLLECTION
 //============================================================================================
   flwMon -> CheckForLostPackets();
-  flwMon -> SerializeToXmlFile("pure_aodvflow.xml",true,false);
+  flwMon -> SerializeToXmlFile(scenario +"flow.xml",true,false);
 
   std::cout<<"=============== Network Performance for "<< numberOfNodes<< " ==============="<<"\n";
   std::cout<<"Backhole attack simulated : "<< setMalicious<< "\n";
   std::cout<<"Total received packets : "<< networkPacketsReceived<<"\n";
   std::cout<<"Total received bytes : "<< networkBytesTotal<<"\n";
-  std::cout<<"Avg Throughput : "<< networkBytesTotal * 8 /(double)Simulator::Now().GetSeconds() - networkSetUpTime<<"\n";
+  std::cout<<"Start simulation time : "<< packetExchangeStartTime <<"\n";
   std::cout<<"Final simulation time : "<< Simulator::Now().GetSeconds()<<"\n";
+  std::cout<<"Avg Throughput : "<< networkBytesTotal * 8 /(double)(Simulator::Now().GetSeconds()) - networkSetUpTime<<"\n";
+
 
   generateCustomGnuplots();
 
