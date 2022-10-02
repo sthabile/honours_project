@@ -55,6 +55,8 @@ NS_OBJECT_ENSURE_REGISTERED (RoutingProtocol);
 /// UDP Port for AODV control traffic
 const uint32_t RoutingProtocol::AODV_PORT = 654;
 
+//const uint32_t RoutingProtocol::ARBITARY_MAX = 100;
+
 /**
 * \ingroup aodv
 * \brief Tag used by AODV implementation
@@ -590,6 +592,7 @@ RoutingProtocol::RouteInput (Ptr<const Packet> p, const Ipv4Header &header,
     }
 
   // Forwarding
+
   return Forwarding (p, header, ucb, ecb);
 }
 
@@ -598,17 +601,23 @@ RoutingProtocol::Forwarding (Ptr<const Packet> p, const Ipv4Header & header,
                              UnicastForwardCallback ucb, ErrorCallback ecb)
 {
   NS_LOG_FUNCTION (this);
+  NS_LOG_LOGIC ("Forwarding a packet");
   Ipv4Address dst = header.GetDestination ();
   Ipv4Address origin = header.GetSource ();
   m_routingTable.Purge ();
   RoutingTableEntry toDst;
 
-/* Code added by Shalini Satre, Wireless INformation Networking Group (Wing), NITK Surathkal for simulating Blackhole Attack.
-   This is taken from the blackhole attack implementation by JohnPieterOber on GitHub
+//============================================================================================
+//             BLACKHOLE ATTACK
+//============================================================================================
+/**
+ * Configuring a malicious node to not process data packets but drop them.
+ * This also follows the blackhole attack patch contributed by Shalini Satre and Mohit P.Tahiliani
  */
+
   if(IsMalicious)
   {
-    std :: cout << "Launching the Blackhole attack! Forwarding functionality disabled...dropping data packets";
+    NS_LOG_UNCOND ("Launching the Blackhole attack! Dropping the data packet\n");
     return false; 
   }
 
@@ -1064,7 +1073,7 @@ RoutingProtocol::SendRequest (Ipv4Address dst)
   // Send RREQ as subnet directed broadcast from each interface used by aodv
   for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::const_iterator j =
          m_socketAddresses.begin (); j != m_socketAddresses.end (); ++j)
-    {
+  {
       Ptr<Socket> socket = j->first;
       Ipv4InterfaceAddress iface = j->second;
 
@@ -1167,12 +1176,12 @@ RoutingProtocol::RecvAodv (Ptr<Socket> socket)
     {
     case AODVTYPE_RREQ:
       {
-        RecvRequest (packet, receiver, sender);  //Here, much check if node is malicious, if so then just drop the pack and send 
+        RecvRequest (packet, receiver, sender);
         break;
       }
     case AODVTYPE_RREP:
       {
-        RecvReply (packet, receiver, sender);
+        RecvReply (packet, receiver, sender); 
         break;
       }
     case AODVTYPE_RERR:
@@ -1376,12 +1385,17 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
        * However, the forwarding node MUST NOT modify its maintained value for the destination sequence number, even if the value
        * received in the incoming RREQ is larger than the value currently maintained by the forwarding node.
        */ 
+
+      
       if (IsMalicious || ((rreqHeader.GetUnknownSeqno () || (int32_t (toDst.GetSeqNo ()) - int32_t (rreqHeader.GetDstSeqno ()) >= 0))
            && toDst.GetValidSeqNo ()) )
         {
           if (IsMalicious || (!rreqHeader.GetDestinationOnly () && toDst.GetFlag () == VALID))
             {
               m_routingTable.LookupRoute (origin, toOrigin);
+//============================================================================================
+//             BLACKHOLE ATTACK
+//============================================================================================
               /* Code added by Shalini Satre, Wireless Information Networking Group (WiNG), NITK Surathkal for simulating Blackhole Attack
                * If node is malicious, it creates false routing table entry having sequence number much higher than
                * that in RREQ message and hop count as 1.
@@ -1390,13 +1404,21 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
               */
               if(IsMalicious)
               {
-                Ptr<NetDevice> dev = m_ipv4->GetNetDevice (m_ipv4->GetInterfaceForAddress (receiver));
-                RoutingTableEntry falseToDst(dev,dst,true,rreqHeader.GetDstSeqno()+100,m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress(receiver),0),1,dst,m_activeRouteTimeout);
+                Ptr<NetDevice> device = m_ipv4->GetNetDevice (m_ipv4->GetInterfaceForAddress (receiver));
+                RoutingTableEntry falseToDst(device,
+                                             dst,
+                                             true,
+                                             rreqHeader.GetDstSeqno()+ 100,
+                                             m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress(receiver),0),
+                                             1,
+                                             dst,
+                                             m_activeRouteTimeout);
                 
                 SendReplyByIntermediateNode (falseToDst, toOrigin, rreqHeader.GetGratuitousRrep ());
                 return;
               }
-              /* Code for Blackhole Attack Simulation ends here */
+//============================================================================================
+
               SendReplyByIntermediateNode (toDst, toOrigin, rreqHeader.GetGratuitousRrep ());
               return;
             }
@@ -1475,10 +1497,19 @@ RoutingProtocol::SendReplyByIntermediateNode (RoutingTableEntry & toDst, Routing
   RrepHeader rrepHeader (/*prefix size=*/ 0, /*hops=*/ toDst.GetHop (), /*dst=*/ toDst.GetDestination (), /*dst seqno=*/ toDst.GetSeqNo (),
                                           /*origin=*/ toOrigin.GetDestination (), /*lifetime=*/ toDst.GetLifeTime ());
 
+//============================================================================================
+//             BLACKHOLE ATTACK
+//============================================================================================
+/**
+ * Setting the hop count to 1.
+ * This makes the node seem as though it has the shortest path the destination
+ * As per the contribitions of Shalini Satre and Mohit P.Tahiliani
+ */
   if (IsMalicious)
   {
-    rrepHeader.SetHopCount(1);  //Attract traffic!  SHalini Satre
+    rrepHeader.SetHopCount(1); 
   }
+  //============================================================================================
 
   /* If the node we received a RREQ for is a neighbor we are
    * probably facing a unidirectional link... Better request a RREP-ack
@@ -1792,6 +1823,11 @@ RoutingProtocol::RecvError (Ptr<Packet> p, Ipv4Address src )
   m_routingTable.InvalidateRoutesWithDst (unreachable);
 }
 
+/**
+ * Handles the route discovery process for dst
+ * First look for route in the routing table. If it does, get packet from queue and send
+ *    
+ */
 void
 RoutingProtocol::RouteRequestTimerExpire (Ipv4Address dst)
 {
@@ -1913,6 +1949,10 @@ RoutingProtocol::SendHello ()
     }
 }
 
+
+/**
+ * Sending queued data packets
+ */
 void
 RoutingProtocol::SendPacketFromQueue (Ipv4Address dst, Ptr<Ipv4Route> route)
 {

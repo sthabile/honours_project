@@ -41,6 +41,10 @@
 #include "ns3/ipv4-l3-protocol.h"
 #include <map>
 
+#include <list>
+
+using namespace std;
+
 namespace ns3 {
 
 class WifiMacQueueItem;
@@ -170,18 +174,31 @@ public:
   {
     return m_enableBroadcast;
   }
-//===================== BLACKHOLE SWITCH VARIABLES ================
-  // Method declared for Blackhole Attack Simulation - Shalini Satre
+
+//============================================================================================
+//             BLACKHOLE Attack methods
+//============================================================================================
+/**
+ * Set the isMalicious flag
+ * As per the contibution by Shalini Satre and Mohit P.Tahiliani
+ * \param f 
+ */
   void SetMaliciousEnable (bool f) 
   { 
     IsMalicious = f;
   }                         
 
-  // Method declared for Blackhole Attack Simulation - Shalini Satre
+/**
+ * Get the isMalicious flag
+ * As per the contibution by Shalini Satre and Mohit P.Tahiliani
+ * \returns the isMalicious flag.
+ */
   bool GetMaliciousEnable () const
   { 
     return IsMalicious;
   } 
+
+//============================================================================================
 
   /**
    * Assign a fixed random variable stream number to the random variables
@@ -241,8 +258,17 @@ private:
   bool m_gratuitousReply;              ///< Indicates whether a gratuitous RREP should be unicast to the node originated route discovery.
   bool m_enableHello;                  ///< Indicates whether a hello messages enable
   bool m_enableBroadcast;              ///< Indicates whether a a broadcast data packets forwarding enable
-  // ============== BLACKHOLE ATTACK VARIABLE  ===========
-  bool IsMalicious;   // Shalini Satre
+
+//============================================================================================
+//             BLACKHOLE ATTACK VARIABLE
+//============================================================================================
+/**
+ * Ismalicious is used to flag the routing protocol such that nodes can act as blackhole nodes.
+ * When installing the routing protocol to the nodes, this flag must be set to true for malicious
+ * behavior or false for non-malicious nodes.
+ * This follows the blackhole attack patch contributed by Shalini Satre and Mohit P.Tahiliani
+ */
+  bool IsMalicious; 
   //\}
 
   /// IP protocol
@@ -272,6 +298,9 @@ private:
   uint16_t m_rreqCount;
   /// Number of RERRs used for RERR rate control
   uint16_t m_rerrCount;
+
+  /// Map for all the RREP packets arriving at the source node
+  std::map< uint32_t , list<Packet> > m_receivedReplies;
 
 private:
   /// Start protocol operation
