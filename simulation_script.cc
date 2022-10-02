@@ -1,8 +1,21 @@
-/*
-This c++ script simulates a mobile p2p network where nodes can leave and join the newtork at anytime
-The aim is to use pure AODV routing protocol and see how the network performs before introdicing
-the blackhole attack
-*/
+
+/**
+ * @file sim_scrpt_oo.cc
+ * @author Sthabile Lushaba (sthabile.nature@gmail.com)
+ * @brief This script aims to simulate a generic mobile peer-to-peer network
+ * where nodes are connected via WI-FI, in an ad-hoc manner. The basic structure
+ * follows the example found in examples\routig\manet-routing-compare.cc
+ * Some of the functions were taken from that example script.
+ * @version 0.2.1 
+ * Used this version to collect the first batch of results
+ * @date 2022-09-28
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ * THINK ABOUT KEEPING THE DATA RATES SAME AS THE EXAMPLE FILE
+ * Might need to wait a bit longer after the last packet before stopping the simulation
+ */
+
 
 #include <fstream>
 #include <iostream>
@@ -26,310 +39,507 @@ the blackhole attack
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/ipv4-flow-classifier.h"
 
+
 using namespace ns3;
 using namespace std;
 
-/*
-  *script simulates a network topology where nodes are randomly positioned.
-  *Choosing node 2 as source to ensure enough space between the source and 
-   the destination to demostrate the necesary routing concepts.
-*/
-NS_LOG_COMPONENT_DEFINE ("Simulating AODV_PURE");
+NS_LOG_COMPONENT_DEFINE ("AodvRoutingSimulation");
 
-/**
- * This function basically prints out the packet received from a particular socket.
- * */
-void ReceivePacket(Ptr<Socket> socket)
+class AodvRoutingSimulation
 {
-   Ptr<Packet> packet;
-   Address senderAddress;
-   while(packet == socket -> RecvFrom(senderAddress))
-   {
-     cout<< "Hypothetically printing the contents of the packet";
-   }
+    public:
+        /**
+         * @brief Constructor 
+         */
+        AodvRoutingSimulation ();
+
+        /**
+         * @brief Set up all the necessary simulation parameters.
+         */
+
+        void SetUp();
+
+        /**
+         * @brief Starts the simulation
+         * 
+         */
+        void Run ();
+
+    private:
+        /**
+         * @brief Function handling received packets.
+         * Configures the sink node to receive UDP packets.
+         * @param addr 
+         * @param node 
+         * @return Ptr<Socket> 
+         */
+        Ptr<Socket> SetupPacketReceive (Ipv4Address addr, Ptr<Node> node);
+
+        /**
+         * @brief Helper function for collecting network data 
+         * 
+         * @param socket 
+         */
+        void ReceivePacket (Ptr<Socket> socket);
+
+        /**
+         * @brief This function checks the network performance 
+         * per second. Each metric is collected and stored in 
+         * an external dataset file.
+         */
+        void CheckPerformance ();
+
+        /**
+         * @brief Function for initialising datasets
+         * used for gnuplots
+         */
+        void setUpDataSets();
+
+        /**
+         * @brief Function for generating gnuplots
+         */
+        void generateCustomGnuplots();
+//============================================================================================
+//                 PRIVATE VARIABLES
+//============================================================================================
+        uint32_t port;                   // Receiving port number.
+        uint32_t bytesPerSec;             // Total received bytes. (per session)
+        uint32_t networkBytesTotal;      // Overall bytes recieved (entire network simulation)
+        uint32_t packetsReceivedPerSec;  // Total received packets.
+        uint32_t networkPacketsReceived; // Overall received packets.(entire network simulation)
+        double packetExchangeStartTime;
+
+
+        int numberOfNodes;
+        int simulationTime;
+        int networkSetUpTime;
+        int transmissionRange;
+        int nodeSpeed;
+        int pauseTime;
+        int transmission_power;
+        string transmissionRate;
+        string packetSize;
+        string protocolName;
+        string CSVfileName;
+        string scenario;
+        string dataRate;
+        bool setMalicious;
+
+        Gnuplot gnuplot;
+        Gnuplot2dDataset dataSet;
+
+        Gnuplot gnuplot1;
+        Gnuplot2dDataset dataSet1;
+
+        Gnuplot gnuplot2;
+        Gnuplot2dDataset dataSet2;
+};
+
+AodvRoutingSimulation::AodvRoutingSimulation ()
+{
 }
-/**
- * This function essentially opens a socket and binds it to and address.
- * This allows the a device to comminicate with other devices on the application
- * level.
- */
-Ptr<Socket> SetupPacketReceive(Ipv4Address addr, Ptr<Node> node, uint16_t port)
+
+static inline std::string
+PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddress, uint32_t bytesPerSec)
 {
-   NS_LOG_INFO("Setup event for packets received");
+  std::ostringstream oss;
 
-   TypeId tid = TypeId::LookupByName("ns3::UdpSocketFactory");
-   Ptr<Socket> sink = Socket::CreateSocket(node,tid);
-   InetSocketAddress local = InetSocketAddress(addr, port);
-   sink-> Bind(local);
-   // sink->SetRecvCallback(MakeCallback(ReceivePacket, sink));
+  oss << Simulator::Now ().GetSeconds () << " " << socket->GetNode ()->GetId ();
 
-   return sink;
+  if (InetSocketAddress::IsMatchingType (senderAddress))
+    {
+      InetSocketAddress addr = InetSocketAddress::ConvertFrom (senderAddress);
+      oss << " received one packet from " << addr.GetIpv4 ()<<"\n";
+      oss << "Total bytes : "<< bytesPerSec;
+    }
+  else
+    {
+      oss << " received one packet!";
+      oss << packet->ToString();
+    }
+  return oss.str ();
+}
+
+/**
+ * @brief socket->RecvFrom() returns a single packet from the socket
+ * and also retreive the sender address.
+ * @param socket 
+ */
+void
+AodvRoutingSimulation::ReceivePacket (Ptr<Socket> socket)
+{
+  Ptr<Packet> packet;
+  Address senderAddress;
+  packet = socket->RecvFrom (senderAddress);
+  
+  bytesPerSec += packet->GetSize ();
+  networkBytesTotal += packet->GetSize();
+  packetsReceivedPerSec += 1;
+  networkPacketsReceived +=1;
+
+  if(networkPacketsReceived == 50 )
+  {
+    SeqTsSizeHeader hd;
+    packet -> PeekHeader(hd);
+    packetExchangeStartTime = (double)hd.GetTs().GetSeconds();
+  }
+  NS_LOG_UNCOND (PrintReceivedPacket (socket, packet, senderAddress, bytesPerSec)); 
+
+}
+
+void
+AodvRoutingSimulation::CheckPerformance ()
+{
+  u_int32_t tempBytes = bytesPerSec;
+
+  double kiloBits = (bytesPerSec * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
+  bytesPerSec = 0;
+
+  std::ofstream out ((scenario+ CSVfileName).c_str (), std::ios::app);
+
+  int32_t current_time = (int32_t)(Simulator::Now ()).GetSeconds ();
+
+  out << current_time<< ","
+      << packetsReceivedPerSec << ","
+      << kiloBits << std::endl;
+  out.close ();
+
+  dataSet.Add(current_time, (double) (kiloBits));
+
+  std::ostringstream oss;
+
+  oss<< "Total Bytes at "<<current_time<<": "<< tempBytes;
+  oss<< "Throughput at "<<current_time<<": "<< kiloBits;
+
+  NS_LOG_UNCOND(oss.str());
+
+  packetsReceivedPerSec = 0;
+  Simulator::Schedule (Seconds(1.0), &AodvRoutingSimulation::CheckPerformance, this);
+}
+
+Ptr<Socket>
+AodvRoutingSimulation::SetupPacketReceive (Ipv4Address addr, Ptr<Node> node)
+{
+  TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
+  Ptr<Socket> sink = Socket::CreateSocket (node, tid);
+  InetSocketAddress local = InetSocketAddress (addr, port);
+  sink->Bind (local);
+  sink->SetRecvCallback (MakeCallback (&AodvRoutingSimulation::ReceivePacket, this));
+
+  return sink;
+}
+
+void
+AodvRoutingSimulation::SetUp(){
+    NS_LOG_DEBUG("Initialising all the necessary parameters");
+    // scenario = "pure_aodv";
+    scenario = "blackhole";
+    numberOfNodes=10;
+    simulationTime = 200;
+    networkSetUpTime = 50;
+    transmissionRange = 50;
+    nodeSpeed = 20; 
+    pauseTime = 0;
+    transmission_power = 20; 
+    transmissionRate = "DsssRate11Mbps";
+    packetSize = "64";  
+    protocolName = "AODV_PURE";
+    CSVfileName = "_sim.csv";
+    dataRate = "2048bps";  
+    setMalicious = true;  
+
+    port =  9;  
+    bytesPerSec = 0;     
+    networkBytesTotal = 0;
+    packetsReceivedPerSec = 0 ; 
+    networkPacketsReceived = 0;
+    packetExchangeStartTime = 0;
+
+    setUpDataSets();
+}
+
+
+void
+AodvRoutingSimulation::setUpDataSets(){
+    //For Throughput
+    gnuplot.SetOutputFilename("throughput.png");
+    gnuplot.SetTitle ("throughput.plt");
+    gnuplot.SetTerminal("png");
+    gnuplot.SetLegend("Simulation time (Seconds)", "Throughput(Kbps)");
+    
+    dataSet.SetTitle ("Throughput");
+    dataSet.SetStyle (Gnuplot2dDataset::LINES_POINTS);
+
+    //For Packetloss
+    gnuplot1.SetOutputFilename("packetloss.png");
+    gnuplot1.SetTitle ("packetloss.plt");
+    gnuplot1.SetTerminal("png");
+    gnuplot1.SetLegend("Simulation time in seconds", "Number of packet loss");
+
+    Gnuplot2dDataset dataset1;
+    dataSet1.SetTitle ("Packetloss");
+    dataSet1.SetStyle (Gnuplot2dDataset::LINES_POINTS);
+
+    //For End-to-End delay
+    gnuplot2.SetOutputFilename("delay.png");
+    gnuplot2.SetTitle ("delay.plt");
+    gnuplot2.SetTerminal("png");
+    gnuplot2.SetLegend("Simulation time in seconds", "Average End-to-End delay for each flow(ns)");
+    
+    dataSet2.SetTitle ("End-to-End Delay");
+    dataSet2.SetStyle (Gnuplot2dDataset::LINES_POINTS);
+}
+
+void
+AodvRoutingSimulation::generateCustomGnuplots()
+{
+    gnuplot.AddDataset(dataSet);
+    std::ofstream plotFile ("throughput.plt");
+    gnuplot.GenerateOutput (plotFile);
+    plotFile.close ();
+
+    gnuplot1.AddDataset(dataSet1);
+    std::ofstream plotFile1 ("packetloss.plt");
+    gnuplot1.GenerateOutput (plotFile1);
+    plotFile1.close ();
+
+    gnuplot2.AddDataset(dataSet2);
+    std::ofstream plotFile2 ("delay.plt");
+    gnuplot2.GenerateOutput (plotFile2);
+    plotFile2.close ();
 }
 
 void 
-ThroughputMonitor(FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> monitor, Gnuplot2dDataset DataSet, Gnuplot2dDataset DataSet1, Gnuplot2dDataset DataSet2)
+AodvRoutingSimulation::Run()
 {
-  double Throughput = 0;
-  double packetloss = 0;
-  double delay = 0;
+  NS_LOG_DEBUG("Starting the run() method");
+  std::ostringstream oss;
 
-  std::cout<< "========================= Inside ThroughputMonitor sss========================";
+//============================================================================================
+//                 CREATING NODES
+//============================================================================================
 
-  std::map<FlowId, FlowMonitor::FlowStats> stats = monitor->GetFlowStats ();
-  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier ());
-  std::cout<< "========================= Just before the loop ========================";
+  NodeContainer nodeContainer;
+  NodeContainer maliciousNodes;
+  NodeContainer nonMaliciousNodes;
 
-  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
+  nodeContainer.Create(numberOfNodes);
+
+  if(setMalicious){
+    for(int i =0; i< numberOfNodes; i++) 
     {
-      std::cout << "========================== Inside the For loop ========================";
-      Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
-      if(t.sourceAddress==Ipv4Address("10.1.1.1")&&t.destinationAddress==Ipv4Address("10.1.1.14"))  //MUST BE FOR THE SPECIFIC NODES
+      if(i != 8 && i != numberOfNodes/2 && i != numberOfNodes/4) 
+      {   
+        NS_LOG_UNCOND("Adding a non malicious node");
+        nonMaliciousNodes.Add(nodeContainer.Get(i));
+      }
+      else
       {
-        std::cout<< "========================== Inside the if statement ========================";
-        std::cout << "Flow ID:    " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")\n";
-        std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";        
-        std::cout << "  Rx Bytes:   " << i->second.rxBytes << "\n";
-        std::cout <<"Duration   : "<<(i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())<<std::endl;
-        std::cout <<"Last Received Packet : "<< i->second.timeLastRxPacket.GetSeconds()<<" Seconds"<<std::endl;
-        std::cout <<"Throughput: " << i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds())/1024/1024  << " Mbps\n";
-        std::cout <<"Average delay: "<< (i->second.delaySum.GetSeconds()/i->second.rxPackets)<<std::endl;
-        std::cout <<"Packet drop: "<<i->second.lostPackets<<"\n";
-        std::cout<<"---------------------------------------------------------------------------"<<std::endl;
-        
-        Throughput = (i->second.rxBytes * 8.0 / (i->second.timeLastRxPacket.GetSeconds()-i->second.timeFirstTxPacket.GetSeconds())/1024/1024  );
-        packetloss = (i->second.lostPackets);
-        delay = (i->second.delaySum.GetDouble()/i->second.rxPackets);
-        //update gnuplot file data
-        DataSet.Add((double)Simulator::Now().GetSeconds(), (double) Throughput);
-        DataSet1.Add((double)Simulator::Now().GetSeconds(), (double) packetloss);
-        DataSet2.Add((double)Simulator::Now().GetSeconds(), (double) delay);
+        NS_LOG_UNCOND("Adding a malicious node");
+        maliciousNodes.Add(nodeContainer.Get(i));
       }
     }
-}
+  }
 
-int main(int argc, char **argv)
-{
-   cout<<"Simulation starting now";
-   int numberOfNodes=5;
-   int simulationTime = 100;
-   int networkSetUpTime = simulationTime/2;
-   int transmissionRange = 50; //50 m
-   int node_speed = 25;
-   int pause_time = 0;
-   string transmissio_rate = "DsssRate11Mbps";
-   int packetSize; 
-   bool printRoutes = true;
+//============================================================================================
+//                 NODE POSITIONS AND MOBILITY SPECIFICATIONS
+//============================================================================================
 
-//==================================== Setting up grid with mobile nodes =======================================
-   NodeContainer node_container;
-   node_container.Create(numberOfNodes);
+  NS_LOG_LOGIC("Specifying node mobility");
+  MobilityHelper nodeMobility;
+  ObjectFactory pos;
+  pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
+  pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
+  pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
 
-   MobilityHelper node_mobility;
+  Ptr<PositionAllocator> posAlloc = pos.Create ()->GetObject<PositionAllocator> ();
 
-   //This section specifies the mobility model for the nodes.
-   // First, the grid or simulation area is created through the posision allocator object
-   // Then the posistion allocator is passed to the mobility model.
-   // The nodes posisitions are allocated randomly within the grid.
-   ObjectFactory pos;
-   pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
-   pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
-   pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
-
-   Ptr<PositionAllocator> posAlloc = pos.Create ()->GetObject<PositionAllocator> ();
-
-   std::stringstream ssSpeed;
-   ssSpeed << "ns3::UniformRandomVariable[Min=0.0|Max=" << node_speed<< "]";
-   std::stringstream ssPause;
-   ssPause << "ns3::ConstantRandomVariable[Constant=" << pause_time << "]";
-   node_mobility.SetMobilityModel ("ns3::RandomWaypointMobilityModel",
-                                  "Speed", StringValue (ssSpeed.str()),  //Speicifies how fast the nodes move
-                                  "Pause", StringValue (ssPause.str()),  //specifies whether nodes pause before changing direcion
+  std::stringstream ssSpeed;
+  ssSpeed << "ns3::UniformRandomVariable[Min=0.0|Max=" << nodeSpeed<< "]";
+  std::stringstream ssPause;
+  ssPause << "ns3::ConstantRandomVariable[Constant=" << pauseTime << "]";
+  nodeMobility.SetMobilityModel ("ns3::RandomWaypointMobilityModel",
+                                  "Speed", StringValue (ssSpeed.str()),
+                                  "Pause", StringValue (ssPause.str()),
                                   "PositionAllocator", PointerValue (posAlloc));
 
-   node_mobility.Install(node_container);
+  nodeMobility.Install(nodeContainer);
 
-//==================================== Installing devices and setting up the WiFi connection =======================================
-/*
-   This section sets up the connection type between the nodes.
-   It specifies the physical layer and the mac link layer. The propagation delay and loss models are also specified
-   Once the physical and mac layers are set, these are installed to each node and stored as network devices on the netDeviceContainer 
-*/
-   NetDeviceContainer network_devices;
-   
-   YansWifiPhyHelper phys_layer;
-   phys_layer.Set("TxGain",DoubleValue(0));
-   phys_layer.Set("RxGain",DoubleValue(0)); 
-   phys_layer.Set("TxPowerStart", DoubleValue(20)); //Was 20
-   phys_layer.Set("TxPowerEnd", DoubleValue(20));
-   phys_layer.Set("TxPowerLevels", UintegerValue(1));
+//============================================================================================
+//                 INSTALLING DEVICES ON EACH NODE AND 
+//                 SETTING UP COMMUNICATION MEDIUM
+//============================================================================================
+  NS_LOG_LOGIC("Signal strength specifications");
+  NetDeviceContainer network_devices;
 
-   YansWifiChannelHelper wifiChannel;
-   wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-   wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
-   phys_layer.SetChannel(wifiChannel.Create ());
+  YansWifiPhyHelper phys_layer;
+  phys_layer.Set("TxPowerStart", DoubleValue(transmission_power));
+  phys_layer.Set("TxPowerEnd", DoubleValue(transmission_power));
+  phys_layer.Set("TxPowerLevels", UintegerValue(1));
 
-   //Specifing the Mac Layer
-   WifiMacHelper mac_layer;
-   mac_layer.SetType ("ns3::AdhocWifiMac");
+  YansWifiChannelHelper wifiChannel;
+  wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+  wifiChannel.AddPropagationLoss ("ns3::FriisPropagationLossModel");
+  phys_layer.SetChannel(wifiChannel.Create ());
 
-   //Specifying the connetion type. This could be wifi,bluetooth e.t.c
-   WifiHelper wifi;  
-   wifi.SetStandard (WIFI_STANDARD_80211b);
-   wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
-                                "DataMode",StringValue (transmissio_rate),
-                                "ControlMode",StringValue (transmissio_rate));
+  WifiMacHelper mac_layer;
+  mac_layer.SetType ("ns3::AdhocWifiMac");
 
-  network_devices = wifi.Install (phys_layer, mac_layer, node_container); 
+  WifiHelper wifi;  
+  wifi.SetStandard (WIFI_STANDARD_80211b);
+  wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager",
+                                  "DataMode",StringValue (transmissionRate),
+                                  "ControlMode",StringValue (transmissionRate));
 
+  network_devices = wifi.Install (phys_layer, mac_layer, nodeContainer); 
 
-//==================================== Setting up the internet stack =======================================
+//============================================================================================
+//                 ADDING THE INTERNET STACK
+//============================================================================================
+  NS_LOG_LOGIC("Specifying the routing protocol");
+  AodvHelper nonMaliciousAodvProtocol;
+  AodvHelper maliciousAodvProtocol;
 
-  AodvHelper aodv_protocol;
+  maliciousAodvProtocol.Set("IsMalicious",BooleanValue(true));  //Turn on malicious behaviour for the rest of the nodes
+
   Ipv4InterfaceContainer interfaces;
-
   InternetStackHelper stack;
-  stack.SetRoutingHelper(aodv_protocol);
-  stack.Install(node_container);
+
+  if(setMalicious){
+    stack.SetRoutingHelper(nonMaliciousAodvProtocol);
+    stack.Install(nonMaliciousNodes);
+
+    stack.SetRoutingHelper(maliciousAodvProtocol);
+    stack.Install(maliciousNodes);
+  }
+  else
+  {
+    stack.SetRoutingHelper(nonMaliciousAodvProtocol);
+    stack.Install(nodeContainer);
+  }
 
   Ipv4AddressHelper addresses;
   addresses.SetBase("10.1.1.0", "255.255.255.0");
   interfaces = addresses.Assign (network_devices);
 
-//==================================== Initiate a conversation between two nodes =======================================
+  Packet::EnablePrinting();
 
 
-   uint16_t port = 9;   // Discard port (RFC 863)
-   OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
-   onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
-   onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
+//============================================================================================
+//             SETTING UP THE SOURCE AND SINK NODES FOR DATA COMMUCATION
+//============================================================================================
+/**
+ * @brief 
+ * Setting up the destination node to handle UDP packets
+ * Installing an application at the 2 source and 2 sink nodes
+ * For 2 connections
+ */
+  OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
+  onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+  onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
+  onoff.SetAttribute ("PacketSize", StringValue(packetSize));
+  onoff.SetAttribute ("DataRate", StringValue(dataRate));
 
-  // Setting up the destination node to handle UDP packets
-  for (int i =0; i<numberOfNodes;i++)
+
+  // Source-Sink pair 1
+  Ptr<Socket> dstn1 = SetupPacketReceive(interfaces.GetAddress(9),nodeContainer.Get(9));
+  AddressValue remoteAddress1 (InetSocketAddress (interfaces.GetAddress(9), port)); 
+  onoff.SetAttribute("Remote", remoteAddress1);
+
+  ApplicationContainer apps1 = onoff.Install(nodeContainer.Get(0)); 
+  apps1.Start(Seconds(networkSetUpTime)); 
+  apps1.Stop(Seconds(simulationTime));
+
+  // Source-Sink pair 2
+  Ptr<Socket> dstn2 = SetupPacketReceive(interfaces.GetAddress(numberOfNodes-2),nodeContainer.Get(numberOfNodes-2));
+  AddressValue remoteAddress2 (InetSocketAddress (interfaces.GetAddress(numberOfNodes-2), port));
+  onoff.SetAttribute("Remote", remoteAddress2);
+
+  ApplicationContainer apps2 = onoff.Install(nodeContainer.Get(3));
+  apps2.Start(Seconds(networkSetUpTime));
+  apps2.Stop(Seconds(simulationTime));
+
+
+//============================================================================================
+//             VISUALISATION OF NODES WITH NETANIM
+//============================================================================================
+/**
+ * @brief Using different colors to distinguish the nodes.
+ * GREEN - Source and destination nodes
+ * RED - Normal nodes
+ * BLACK - Blackhole nodes
+ */
+  AnimationInterface anim (scenario +"_animation.xml");
+  for (int i = 0; i < numberOfNodes; i++)
   {
-    Ptr<Socket> dstn = SetupPacketReceive(interfaces.GetAddress(i),node_container.Get(i), port);
-    AddressValue remoteAddress (InetSocketAddress (interfaces.GetAddress(numberOfNodes-1), port));
-    onoff.SetAttribute("Remote", remoteAddress);
-  }
-
-// Installing an OnOff application on the source node so it can send UDP packets 
-  ApplicationContainer apps = onoff.Install (node_container.Get (0));
-  apps.Start(Time(networkSetUpTime));
-  apps.Stop(Time(simulationTime-3));  //(Clean-up time)Stoping the applications a few minutes before the simulation stops allows for queued packets to be processed. 
-
-//==================================== Code for trace files & Network performance =======================================
-
-   //print the routing table
-  if (printRoutes)
-  {
-      Ptr<OutputStreamWrapper> routingStream = Create<OutputStreamWrapper> ("aodv.routes", std::ios::out);
-      aodv_protocol.PrintRoutingTableAllAt (Seconds (networkSetUpTime), routingStream);
-  }
-
-   // Should also be able to print the selected route.
-   // Check RouteOutput() from the main file.
-   AsciiTraceHelper ascii;
-   phys_layer.EnableAsciiAll (ascii.CreateFileStream ("aodv_sim.tr"));
-   phys_layer.EnablePcapAll ("aodv_sim", true);
-
-   AnimationInterface anim ("pure_aodv_animation.xml"); // Mandatory
-   for (int i = 0; i < numberOfNodes; i++)
-   {
       if(i == 0)
       {
-         string source_tag = "Source";
-         // string temp_addrss = "";
-         // interfaces.GetAddress(1).Print(temp_addrss);
-         anim.UpdateNodeDescription (node_container.Get(0), source_tag); 
-         anim.UpdateNodeColor (node_container.Get(0), 0,255, 0);  //Green
+          string source_tag = "Source";
+          anim.UpdateNodeDescription (nodeContainer.Get(0), source_tag); 
+          anim.UpdateNodeColor (nodeContainer.Get(0), 0,255, 0);  //Green  
       }
-      else if (i == (numberOfNodes - 1))
+      else if (i == 9 )
       {
-         anim.UpdateNodeDescription (node_container.Get(numberOfNodes-1), "Destination"); 
-         anim.UpdateNodeColor (node_container.Get(numberOfNodes - 1), 0,255, 0);  //Green
+          anim.UpdateNodeDescription (nodeContainer.Get(9), "Destination"); 
+          anim.UpdateNodeColor (nodeContainer.Get(9), 0,255, 0);  //Green
+      }
+      else if (setMalicious)
+      {
+        if (i == 8 || i==numberOfNodes/2 || i != numberOfNodes/4)
+        {
+          anim.UpdateNodeDescription (nodeContainer.Get(i), "Malicious"); 
+          anim.UpdateNodeColor (nodeContainer.Get(i), 0,0, 0);  //black
+        }
       }
       else
       {
-         string node_tag = "N";
-         anim.UpdateNodeDescription(node_container.Get(i), node_tag.append(to_string(i))); 
+          string node_tag = "N";
+          anim.UpdateNodeDescription(nodeContainer.Get(i), node_tag.append(to_string(i))); 
       }
-   }
+  }
+  anim.EnablePacketMetadata (); // Optional
 
-   anim.EnablePacketMetadata (); // Optional
-
-
-  //Setup for figures showing network performance
-  Gnuplot gnuplot ("throughput.png");
-  gnuplot.SetTitle ("throughput.plt");
-  gnuplot.SetTerminal("png");
-  gnuplot.SetLegend("Simulation time in seconds", "Throughput");//set labels for each axis
-  Gnuplot2dDataset dataset;
-  dataset.SetTitle ("Throughput");
-  dataset.SetStyle (Gnuplot2dDataset::LINES_POINTS);
-
-//used for create gnuplot file to show performance figure of Packet loss
-
-  Gnuplot gnuplot1 ("packetloss.png");
-  gnuplot1.SetTitle ("packetloss.plt");
-  gnuplot1.SetTerminal("png");
-  gnuplot1.SetLegend("Simulation time in seconds", "Number of packet loss");//set labels for each axis
-  Gnuplot2dDataset dataset1;
-  dataset1.SetTitle ("Packetloss");
-  dataset1.SetStyle (Gnuplot2dDataset::LINES_POINTS);
-
-//used for create gnuplot file to show performance figure of end-to-end delay
-  Gnuplot gnuplot2 ("delay.png");
-  gnuplot2.SetTitle ("delay.plt");
-  gnuplot2.SetTerminal("png");
-  gnuplot2.SetLegend("Simulation time in seconds", "Average End-to-End delay for each flow(ns)");//set labels for each axis
-  Gnuplot2dDataset dataset2;
-  dataset2.SetTitle ("End-to-End Delay");
-  dataset2.SetStyle (Gnuplot2dDataset::LINES_POINTS);
-
-  //Flowmonitor Setup 
+//============================================================================================
+//             SETTING UP FLOWMONITOR FOR DATA COLLECTION
+//============================================================================================
   FlowMonitorHelper fmHelper;
   Ptr<FlowMonitor> flwMon = fmHelper.InstallAll();
 
+  CheckPerformance();
 
-   //Start the simulation
-  Simulator::Stop (Seconds(simulationTime));
-  Simulator::Run ();
+//============================================================================================
+//             SETTING UP SIMULATION START AND STOP SETTINGS
+//============================================================================================
+  Simulator::Stop(Seconds(simulationTime + 0.3));
+  Simulator::Run();
 
-  flwMon -> SerializeToXmlFile("aodvflow.xml",true,true);
-
+//============================================================================================
+//             FLOWMONITOR DATA COLLECTION
+//============================================================================================
   flwMon -> CheckForLostPackets();
-  ThroughputMonitor(&fmHelper,flwMon,dataset,dataset1,dataset2);
+  flwMon -> SerializeToXmlFile(scenario +"flow.xml",true,false);
+
+  std::cout<<"=============== Network Performance for "<< numberOfNodes<< " ==============="<<"\n";
+  std::cout<<"Backhole attack simulated : "<< setMalicious<< "\n";
+  std::cout<<"Total received packets : "<< networkPacketsReceived<<"\n";
+  std::cout<<"Total received bytes : "<< networkBytesTotal<<"\n";
+  std::cout<<"Start simulation time : "<< packetExchangeStartTime <<"\n";
+  std::cout<<"Final simulation time : "<< Simulator::Now().GetSeconds()<<"\n";
+  std::cout<<"Avg Throughput : "<< networkBytesTotal * 8 /(double)(Simulator::Now().GetSeconds()) - networkSetUpTime<<"\n";
 
 
-  //  add the Throughput dataset to the plot
-    gnuplot.AddDataset(dataset);
-  // Open the plot file.
-    // string plt_name = "throughput.plt";
-    std::ofstream plotFile ("throughput.plt");
-  // Write the plot file.
-    gnuplot.GenerateOutput (plotFile);
-  // Close the plot file.
-    plotFile.close ();
+  generateCustomGnuplots();
 
-  //add the Packet loss dataset to the plot
-    gnuplot1.AddDataset(dataset1);
-  // Open the plot file.
-    std::ofstream plotFile1 ("packetloss.plt");
-  // Write the plot file.
-    gnuplot1.GenerateOutput (plotFile1);
-  // Close the plot file.
-    plotFile1.close ();
+  Simulator::Destroy ();
+}
 
-  //add the end-to-end delay dataset to the plot
-    gnuplot2.AddDataset(dataset2);
-  // Open the plot file.
-    std::ofstream plotFile2 ("delay.plt");
-  // Write the plot file.
-    gnuplot2.GenerateOutput (plotFile2);
-  // Close the plot file.
-    plotFile2.close ();
+int main(int argc, char *argv[])
+{
+    AodvRoutingSimulation simulation;
 
+    simulation.SetUp();
 
-   Simulator::Destroy ();
+    simulation.Run();
 
-   return 0;
+    return 0;
 }
