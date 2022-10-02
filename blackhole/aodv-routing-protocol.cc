@@ -607,16 +607,17 @@ RoutingProtocol::Forwarding (Ptr<const Packet> p, const Ipv4Header & header,
   m_routingTable.Purge ();
   RoutingTableEntry toDst;
 
-/* Code added by Shalini Satre, Wireless INformation Networking Group (Wing), NITK Surathkal for simulating Blackhole Attack.
-   This is taken from the blackhole attack implementation by JohnPieterOber on GitHub
+//============================================================================================
+//             BLACKHOLE ATTACK
+//============================================================================================
+/**
+ * Configuring a malicious node to not process data packets but drop them.
+ * This also follows the blackhole attack patch contributed by Shalini Satre and Mohit P.Tahiliani
  */
+
   if(IsMalicious)
   {
-    std::ostringstream oss;
-    oss<<"Launching the blackhole attack\n";
-    NS_LOG_UNCOND(oss.str());
-
-    NS_LOG_LOGIC ("Launching the Blackhole attack! Dropping the data packet\n");
+    NS_LOG_UNCOND ("Launching the Blackhole attack! Dropping the data packet\n");
     return false; 
   }
 
