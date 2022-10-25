@@ -1,2 +1,2 @@
 # honours_project
-All files for my Honour's project
+NB!! Official projet files are stored on the dev branch
