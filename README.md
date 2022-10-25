@@ -15,7 +15,7 @@ NB!! Official projet files are stored on the dev branch
  # Running Simulations
 In order to run the simulations follow these steps
 - Install NS3.36 using bake, as detailed at https://www.nsnam.org/wiki/Installation#Installation_with_Bake
-- Build the simulatoe as explaned on the same page
+- Build the simulator as explaned on the same page
 - Download the project files from the dev branch
 - copy the files to the respetive folders
 - copy the simulation script to the scratch diretory
