@@ -1,19 +1,16 @@
 
 /**
- * @file sim_scrpt_oo.cc
+ * @file simulation_script.cc
  * @author Sthabile Lushaba (sthabile.nature@gmail.com)
  * @brief This script aims to simulate a generic mobile peer-to-peer network
  * where nodes are connected via WI-FI, in an ad-hoc manner. The basic structure
  * follows the example found in examples\routig\manet-routing-compare.cc
  * Some of the functions were taken from that example script.
- * @version 0.2.1 
- * Used this version to collect the first batch of results
- * @date 2022-09-28
+ * @version 1.0.0 
+ * @date 2022-10-24
  * 
  * @copyright Copyright (c) 2022
  * 
- * THINK ABOUT KEEPING THE DATA RATES SAME AS THE EXAMPLE FILE
- * Might need to wait a bit longer after the last packet before stopping the simulation
  */
 
 
@@ -107,8 +104,9 @@ class AodvRoutingSimulation
         uint32_t networkBytesTotal;      // Overall bytes recieved (entire network simulation)
         uint32_t packetsReceivedPerSec;  // Total received packets.
         uint32_t networkPacketsReceived; // Overall received packets.(entire network simulation)
-        double packetExchangeStartTime;
-
+        double  packetExchangeStartTime;
+        uint32_t packetlossPerSecond;
+        uint32_t delayPerSecond;
 
         int numberOfNodes;
         int simulationTime;
@@ -124,6 +122,7 @@ class AodvRoutingSimulation
         string scenario;
         string dataRate;
         bool setMalicious;
+        bool enableDetection;
 
         Gnuplot gnuplot;
         Gnuplot2dDataset dataSet;
@@ -138,6 +137,10 @@ class AodvRoutingSimulation
 AodvRoutingSimulation::AodvRoutingSimulation ()
 {
 }
+
+/**
+ * @brief See based on the PrintReceivedPacket() from manet-routing-compare
+ */
 
 static inline std::string
 PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddress, uint32_t bytesPerSec)
@@ -163,7 +166,7 @@ PrintReceivedPacket (Ptr<Socket> socket, Ptr<Packet> packet, Address senderAddre
 /**
  * @brief socket->RecvFrom() returns a single packet from the socket
  * and also retreive the sender address.
- * @param socket 
+ * Based on the ReceivePacket from manet-routing-compare
  */
 void
 AodvRoutingSimulation::ReceivePacket (Ptr<Socket> socket)
@@ -177,7 +180,7 @@ AodvRoutingSimulation::ReceivePacket (Ptr<Socket> socket)
   packetsReceivedPerSec += 1;
   networkPacketsReceived +=1;
 
-  if(networkPacketsReceived == 50 )
+  if(networkPacketsReceived == 1) //first packet
   {
     SeqTsSizeHeader hd;
     packet -> PeekHeader(hd);
@@ -192,7 +195,7 @@ AodvRoutingSimulation::CheckPerformance ()
 {
   u_int32_t tempBytes = bytesPerSec;
 
-  double kiloBits = (bytesPerSec * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
+  double kiloBits = (tempBytes * 8.0) / 1000;  //Multiply by 8 to convert to bits, then devide by 1000 to convert to kilobits
   bytesPerSec = 0;
 
   std::ofstream out ((scenario+ CSVfileName).c_str (), std::ios::app);
@@ -201,22 +204,18 @@ AodvRoutingSimulation::CheckPerformance ()
 
   out << current_time<< ","
       << packetsReceivedPerSec << ","
-      << kiloBits << std::endl;
+      << kiloBits/10 << std::endl;  //killobits per second
   out.close ();
 
   dataSet.Add(current_time, (double) (kiloBits));
 
-  std::ostringstream oss;
-
-  oss<< "Total Bytes at "<<current_time<<": "<< tempBytes;
-  oss<< "Throughput at "<<current_time<<": "<< kiloBits;
-
-  NS_LOG_UNCOND(oss.str());
-
   packetsReceivedPerSec = 0;
-  Simulator::Schedule (Seconds(1.0), &AodvRoutingSimulation::CheckPerformance, this);
+  Simulator::Schedule (Seconds(10.0), &AodvRoutingSimulation::CheckPerformance, this);
 }
 
+/**
+ * @brief See based on the SetupPacketReceive() from manet-routing-compare
+ */
 Ptr<Socket>
 AodvRoutingSimulation::SetupPacketReceive (Ipv4Address addr, Ptr<Node> node)
 {
@@ -232,13 +231,13 @@ AodvRoutingSimulation::SetupPacketReceive (Ipv4Address addr, Ptr<Node> node)
 void
 AodvRoutingSimulation::SetUp(){
     NS_LOG_DEBUG("Initialising all the necessary parameters");
-    // scenario = "pure_aodv";
-    scenario = "blackhole";
-    numberOfNodes=10;
+    scenario = "20-blackhole_performance over time";
+    // scenario = "blackhole";
+    numberOfNodes= 20;
     simulationTime = 200;
     networkSetUpTime = 50;
-    transmissionRange = 50;
-    nodeSpeed = 20; 
+    transmissionRange = 20;
+    nodeSpeed = 25; 
     pauseTime = 0;
     transmission_power = 20; 
     transmissionRate = "DsssRate11Mbps";
@@ -246,7 +245,8 @@ AodvRoutingSimulation::SetUp(){
     protocolName = "AODV_PURE";
     CSVfileName = "_sim.csv";
     dataRate = "2048bps";  
-    setMalicious = true;  
+    setMalicious = false;
+    enableDetection = false;  
 
     port =  9;  
     bytesPerSec = 0;     
@@ -319,24 +319,24 @@ AodvRoutingSimulation::Run()
 //                 CREATING NODES
 //============================================================================================
 
-  NodeContainer nodeContainer;
+  NodeContainer allNodeContainer;
   NodeContainer maliciousNodes;
   NodeContainer nonMaliciousNodes;
 
-  nodeContainer.Create(numberOfNodes);
+  allNodeContainer.Create(numberOfNodes);
 
   if(setMalicious){
     for(int i =0; i< numberOfNodes; i++) 
     {
       if(i != 8 && i != numberOfNodes/2 && i != numberOfNodes/4) 
       {   
-        NS_LOG_UNCOND("Adding a non malicious node");
-        nonMaliciousNodes.Add(nodeContainer.Get(i));
+        // NS_LOG_UNCOND("Adding a non malicious node");
+        nonMaliciousNodes.Add(allNodeContainer.Get(i));
       }
       else
       {
-        NS_LOG_UNCOND("Adding a malicious node");
-        maliciousNodes.Add(nodeContainer.Get(i));
+        // NS_LOG_UNCOND("Adding a malicious node");
+        maliciousNodes.Add(allNodeContainer.Get(i));
       }
     }
   }
@@ -347,43 +347,43 @@ AodvRoutingSimulation::Run()
 
   NS_LOG_LOGIC("Specifying node mobility");
   MobilityHelper nodeMobility;
-  ObjectFactory pos;
-  pos.SetTypeId ("ns3::RandomRectanglePositionAllocator");
-  pos.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
-  pos.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
+  ObjectFactory positionAllocatorFactory;
+  positionAllocatorFactory.SetTypeId ("ns3::RandomRectanglePositionAllocator");
+  positionAllocatorFactory.Set ("X", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
+  positionAllocatorFactory.Set ("Y", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=1500.0]"));
 
-  Ptr<PositionAllocator> posAlloc = pos.Create ()->GetObject<PositionAllocator> ();
-
-  std::stringstream ssSpeed;
-  ssSpeed << "ns3::UniformRandomVariable[Min=0.0|Max=" << nodeSpeed<< "]";
-  std::stringstream ssPause;
-  ssPause << "ns3::ConstantRandomVariable[Constant=" << pauseTime << "]";
+  Ptr<PositionAllocator> posAlloc = positionAllocatorFactory.Create ()->GetObject<PositionAllocator> ();
+// 
+  std::stringstream selectedSpeed;
+  selectedSpeed << "ns3::UniformRandomVariable[Min=0.0|Max=" << nodeSpeed<< "]";
+  std::stringstream selectedPauseTime;
+  selectedPauseTime << "ns3::ConstantRandomVariable[Constant=" << pauseTime << "]";
   nodeMobility.SetMobilityModel ("ns3::RandomWaypointMobilityModel",
-                                  "Speed", StringValue (ssSpeed.str()),
-                                  "Pause", StringValue (ssPause.str()),
+                                  "Speed", StringValue (selectedSpeed.str()),
+                                  "Pause", StringValue (selectedPauseTime.str()),
                                   "PositionAllocator", PointerValue (posAlloc));
 
-  nodeMobility.Install(nodeContainer);
+  nodeMobility.Install(allNodeContainer);
 
 //============================================================================================
 //                 INSTALLING DEVICES ON EACH NODE AND 
 //                 SETTING UP COMMUNICATION MEDIUM
 //============================================================================================
   NS_LOG_LOGIC("Signal strength specifications");
-  NetDeviceContainer network_devices;
+  NetDeviceContainer networkDevices;
 
-  YansWifiPhyHelper phys_layer;
-  phys_layer.Set("TxPowerStart", DoubleValue(transmission_power));
-  phys_layer.Set("TxPowerEnd", DoubleValue(transmission_power));
-  phys_layer.Set("TxPowerLevels", UintegerValue(1));
+  YansWifiPhyHelper physLayer;
+  physLayer.Set("TxPowerStart", DoubleValue(transmission_power));
+  physLayer.Set("TxPowerEnd", DoubleValue(transmission_power));
+  physLayer.Set("TxPowerLevels", UintegerValue(1));
 
   YansWifiChannelHelper wifiChannel;
   wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
   wifiChannel.AddPropagationLoss ("ns3::FriisPropagationLossModel");
-  phys_layer.SetChannel(wifiChannel.Create ());
+  physLayer.SetChannel(wifiChannel.Create ());
 
-  WifiMacHelper mac_layer;
-  mac_layer.SetType ("ns3::AdhocWifiMac");
+  WifiMacHelper macLayer;
+  macLayer.SetType ("ns3::AdhocWifiMac");
 
   WifiHelper wifi;  
   wifi.SetStandard (WIFI_STANDARD_80211b);
@@ -391,7 +391,7 @@ AodvRoutingSimulation::Run()
                                   "DataMode",StringValue (transmissionRate),
                                   "ControlMode",StringValue (transmissionRate));
 
-  network_devices = wifi.Install (phys_layer, mac_layer, nodeContainer); 
+  networkDevices = wifi.Install (physLayer, macLayer, allNodeContainer); 
 
 //============================================================================================
 //                 ADDING THE INTERNET STACK
@@ -401,8 +401,11 @@ AodvRoutingSimulation::Run()
   AodvHelper maliciousAodvProtocol;
 
   maliciousAodvProtocol.Set("IsMalicious",BooleanValue(true));  //Turn on malicious behaviour for the rest of the nodes
+  if(enableDetection){
+    nonMaliciousAodvProtocol.Set("enableBlackholeAttackDetection", BooleanValue(true));      
+  }
 
-  Ipv4InterfaceContainer interfaces;
+  Ipv4InterfaceContainer nodeInterfaces;
   InternetStackHelper stack;
 
   if(setMalicious){
@@ -415,18 +418,24 @@ AodvRoutingSimulation::Run()
   else
   {
     stack.SetRoutingHelper(nonMaliciousAodvProtocol);
-    stack.Install(nodeContainer);
+    stack.Install(allNodeContainer);
   }
 
-  Ipv4AddressHelper addresses;
-  addresses.SetBase("10.1.1.0", "255.255.255.0");
-  interfaces = addresses.Assign (network_devices);
+  Ipv4AddressHelper nodeAddresses;
+  nodeAddresses.SetBase("10.1.1.0", "255.255.255.0");
+  nodeInterfaces = nodeAddresses.Assign (networkDevices);
 
   Packet::EnablePrinting();
 
+  Ptr<OutputStreamWrapper> routingOutputStream = Create<OutputStreamWrapper> ("aodv.routes", std::ios::out);
+  nonMaliciousAodvProtocol.PrintRoutingTableAllAt (Seconds (8), routingOutputStream);
+
+  if(setMalicious){
+    maliciousAodvProtocol.PrintRoutingTableAllAt (Seconds (8), routingOutputStream);
+  }
 
 //============================================================================================
-//             SETTING UP THE SOURCE AND SINK NODES FOR DATA COMMUCATION
+//             SETTING UP THE SOURCE AND SINK NODES FOR DATA COMMUNICATION
 //============================================================================================
 /**
  * @brief 
@@ -434,31 +443,35 @@ AodvRoutingSimulation::Run()
  * Installing an application at the 2 source and 2 sink nodes
  * For 2 connections
  */
-  OnOffHelper onoff ("ns3::UdpSocketFactory", Address());
-  onoff.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
-  onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
-  onoff.SetAttribute ("PacketSize", StringValue(packetSize));
-  onoff.SetAttribute ("DataRate", StringValue(dataRate));
+  OnOffHelper onoffAppHelper ("ns3::UdpSocketFactory", Address());
+  onoffAppHelper.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+  onoffAppHelper.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.0]"));
+  onoffAppHelper.SetAttribute ("PacketSize", StringValue(packetSize));
+  onoffAppHelper.SetAttribute ("DataRate", StringValue(dataRate));
 
+  // Source-Sink pair 1s
+  Ptr<Socket> firstSinkNode = SetupPacketReceive(nodeInterfaces.GetAddress(9),allNodeContainer.Get(9));
+  AddressValue firstRemoteAddress (InetSocketAddress (nodeInterfaces.GetAddress(9), port)); 
+  onoffAppHelper.SetAttribute("Remote", firstRemoteAddress);
 
-  // Source-Sink pair 1
-  Ptr<Socket> dstn1 = SetupPacketReceive(interfaces.GetAddress(9),nodeContainer.Get(9));
-  AddressValue remoteAddress1 (InetSocketAddress (interfaces.GetAddress(9), port)); 
-  onoff.SetAttribute("Remote", remoteAddress1);
-
-  ApplicationContainer apps1 = onoff.Install(nodeContainer.Get(0)); 
-  apps1.Start(Seconds(networkSetUpTime)); 
-  apps1.Stop(Seconds(simulationTime));
+  ApplicationContainer firstSourceApplication = onoffAppHelper.Install(allNodeContainer.Get(0)); 
+  firstSourceApplication.Start(Seconds(networkSetUpTime)); 
+  firstSourceApplication.Stop(Seconds(simulationTime));
 
   // Source-Sink pair 2
-  Ptr<Socket> dstn2 = SetupPacketReceive(interfaces.GetAddress(numberOfNodes-2),nodeContainer.Get(numberOfNodes-2));
-  AddressValue remoteAddress2 (InetSocketAddress (interfaces.GetAddress(numberOfNodes-2), port));
-  onoff.SetAttribute("Remote", remoteAddress2);
+  Ptr<Socket>secondSinkNode = SetupPacketReceive(nodeInterfaces.GetAddress(numberOfNodes-2),allNodeContainer.Get(numberOfNodes-2));
+  AddressValue secondRemoteAddress (InetSocketAddress (nodeInterfaces.GetAddress(numberOfNodes-2), port));
+  onoffAppHelper.SetAttribute("Remote", secondRemoteAddress);
 
-  ApplicationContainer apps2 = onoff.Install(nodeContainer.Get(3));
-  apps2.Start(Seconds(networkSetUpTime));
-  apps2.Stop(Seconds(simulationTime));
+  ApplicationContainer secondSourceApplication = onoffAppHelper.Install(allNodeContainer.Get(3));
+  secondSourceApplication.Start(Seconds(networkSetUpTime));
+  secondSourceApplication.Stop(Seconds(simulationTime));
 
+//===========================================================================================
+//                PRINTING PCAP FILES
+//===========================================================================================
+  AsciiTraceHelper asciHelper;
+  physLayer.EnablePcapAll("aodv_node_pcap", true);
 
 //============================================================================================
 //             VISUALISATION OF NODES WITH NETANIM
@@ -472,29 +485,38 @@ AodvRoutingSimulation::Run()
   AnimationInterface anim (scenario +"_animation.xml");
   for (int i = 0; i < numberOfNodes; i++)
   {
-      if(i == 0)
+      if(i == 0 || i == 3)
       {
-          string source_tag = "Source";
-          anim.UpdateNodeDescription (nodeContainer.Get(0), source_tag); 
-          anim.UpdateNodeColor (nodeContainer.Get(0), 0,255, 0);  //Green  
+          string source_tag = "Source:N";
+          anim.UpdateNodeDescription (allNodeContainer.Get(i), source_tag.append(to_string(i))); 
+          anim.UpdateNodeColor (allNodeContainer.Get(i), 0,255, 0);  //Green  
       }
-      else if (i == 9 )
+      else if (i == 9 || i == numberOfNodes-2)
       {
-          anim.UpdateNodeDescription (nodeContainer.Get(9), "Destination"); 
-          anim.UpdateNodeColor (nodeContainer.Get(9), 0,255, 0);  //Green
-      }
-      else if (setMalicious)
-      {
-        if (i == 8 || i==numberOfNodes/2 || i != numberOfNodes/4)
-        {
-          anim.UpdateNodeDescription (nodeContainer.Get(i), "Malicious"); 
-          anim.UpdateNodeColor (nodeContainer.Get(i), 0,0, 0);  //black
-        }
+          string source_tag = "Destination:N";
+          anim.UpdateNodeDescription (allNodeContainer.Get(i), source_tag.append(to_string(i))); 
+          anim.UpdateNodeColor (allNodeContainer.Get(i), 0,255, 0);  //Green
       }
       else
       {
-          string node_tag = "N";
-          anim.UpdateNodeDescription(nodeContainer.Get(i), node_tag.append(to_string(i))); 
+          if(setMalicious)
+          {
+            if (i == 8 || i==numberOfNodes/2 || i == numberOfNodes/4){
+              anim.UpdateNodeDescription (allNodeContainer.Get(i), "Malicious"); 
+              anim.UpdateNodeColor (allNodeContainer.Get(i), 0,0, 0);  //black
+            }
+            else
+            {
+              string node_tag = "N";
+              anim.UpdateNodeDescription(allNodeContainer.Get(i), node_tag.append(to_string(i)));              
+            }
+          }
+          else
+          {
+              string node_tag = "N";
+              anim.UpdateNodeDescription(allNodeContainer.Get(i), node_tag.append(to_string(i))); 
+          }
+
       }
   }
   anim.EnablePacketMetadata (); // Optional
@@ -521,12 +543,39 @@ AodvRoutingSimulation::Run()
 
   std::cout<<"=============== Network Performance for "<< numberOfNodes<< " ==============="<<"\n";
   std::cout<<"Backhole attack simulated : "<< setMalicious<< "\n";
+  std::cout<<"Detection mode : "<< enableDetection<< "\n";
   std::cout<<"Total received packets : "<< networkPacketsReceived<<"\n";
   std::cout<<"Total received bytes : "<< networkBytesTotal<<"\n";
-  std::cout<<"Start simulation time : "<< packetExchangeStartTime <<"\n";
+  std::cout<<"Application start time : "<< networkSetUpTime<<"\n";
   std::cout<<"Final simulation time : "<< Simulator::Now().GetSeconds()<<"\n";
-  std::cout<<"Avg Throughput : "<< networkBytesTotal * 8 /(double)(Simulator::Now().GetSeconds()) - networkSetUpTime<<"\n";
+  std::cout<<"Avg Throughput : "<< (networkBytesTotal * 8 )/((double)(Simulator::Now().GetSeconds()) - networkSetUpTime)<<"kbps\n";
 
+  double sentPackets = 0;
+  double receiverPackets = 0;
+  double lostPackets = 0;
+  double delayAvg = 0;
+  double throughputAvg = 0;
+
+  std::map<FlowId, FlowMonitor::FlowStats> stats = flwMon->GetFlowStats ();
+  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (fmHelper.GetClassifier ());
+
+  int32_t numOfFlows = 0;
+
+  for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
+  {
+    Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+      
+      sentPackets = sentPackets + (i -> second.txPackets);
+      receiverPackets = receiverPackets + (i -> second.rxPackets);
+      lostPackets = lostPackets + (i -> second.txPackets - i ->second.rxPackets);
+      delayAvg = delayAvg + (i -> second.delaySum.GetSeconds());
+
+      numOfFlows += 1;
+  }
+
+  std::cout<<"========== Flow Monitor ========="<<"\n";
+  std::cout <<"Packet Delivery Ratio: "<< (receiverPackets * 100 )/sentPackets<<"%\n";
+  std::cout <<"Average delay: "<< delayAvg<<" sec"<<std::endl;
 
   generateCustomGnuplots();
 
